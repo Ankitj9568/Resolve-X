@@ -1,0 +1,19 @@
+# ── Web Framework ──────────────────────────────────────────────────────────────
+fastapi==0.115.6          # High-performance async web framework
+uvicorn[standard]==0.32.1 # ASGI server with websocket + reload support
+
+# ── Validation ─────────────────────────────────────────────────────────────────
+pydantic==2.10.4          # Data validation with Python type hints (v2)
+pydantic-settings==2.7.0  # Settings management from env / .env files
+
+# ── LLM Client ─────────────────────────────────────────────────────────────────
+# NVIDIA NIM exposes an OpenAI-compatible REST API, so we use the official
+# OpenAI SDK pointed at NIM's base URL.  Swapping to Anthropic / LiteLLM later
+# only requires changing llm_service.py — nothing else touches the LLM layer.
+openai==1.59.9
+
+# ── HTTP / Async ───────────────────────────────────────────────────────────────
+httpx==0.28.1             # Async HTTP client (used by openai SDK internally)
+
+# ── Utilities ──────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1      # Load secrets from a .env file in development
