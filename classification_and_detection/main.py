@@ -30,19 +30,47 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from config import settings
 from llm_service import (
     LLMAPIError,
     LLMParseError,
     LLMTimeoutError,
-    classify_complaint,
 )
-from models import AnalyzeRequest, AnalyzeResponse, ErrorDetail
+from models import AnalyzeResponse, ErrorDetail
+from services import (
+    close_db_pool,
+    create_db_pool,
+    find_spatial_duplicate,
+    run_intelligence_pass,
+)
+
+
+class AnalyzeV1Request(BaseModel):
+    """Incoming payload for POST /api/v1/analyze."""
+
+    text_description: str = Field(..., min_length=10, max_length=4_000)
+    image_base64: str | None = None
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    user_selected_category: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator("text_description")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class AnalyzeAPIResponse(BaseModel):
+    """Envelope response with duplicate metadata and optional analysis payload."""
+
+    is_duplicate: bool
+    parent_id: str | None
+    analysis: AnalyzeResponse | None
 
 # ── Logging Setup ──────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -72,11 +100,14 @@ async def lifespan(app: FastAPI):
     logger.info("  Max tokens : %d", settings.llm_max_tokens)
     logger.info("  Timeout    : %.1f s", settings.llm_timeout_seconds)
     logger.info("  Max retries: %d", settings.llm_max_retries)
+
+    app.state.db_pool = await create_db_pool()
     logger.info("═" * 60)
 
     yield  # Application runs here
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
+    await close_db_pool(getattr(app.state, "db_pool", None))
     logger.info("%s shutting down gracefully.", settings.service_name)
 
 
@@ -86,7 +117,8 @@ app = FastAPI(
     title=settings.service_name,
     description=(
         "Microservice that classifies urban citizen complaints into structured "
-        "categories using an LLM backend (NVIDIA NIM / GLM-4). "
+        "categories using an LLM backend (NVIDIA NIM / GLM-4) with a "
+        "PostGIS-based spatial duplicate short-circuit layer. "
         "Part of the ResolveX Smart Public Service CRM platform."
     ),
     version="1.0.0",
@@ -201,12 +233,13 @@ async def health_check():
         "status": "ok",
         "service": settings.service_name,
         "model": settings.nim_model,
+        "db_pool_ready": getattr(app.state, "db_pool", None) is not None,
     }
 
 
 @app.post(
     f"/api/{settings.api_version}/analyze",
-    response_model=AnalyzeResponse,
+    response_model=AnalyzeAPIResponse,
     status_code=status.HTTP_200_OK,
     summary="Classify a Citizen Complaint",
     tags=["Classification"],
@@ -217,54 +250,49 @@ async def health_check():
         504: {"description": "LLM API timed out."},
     },
 )
-async def analyze_complaint(payload: AnalyzeRequest) -> AnalyzeResponse:
-    """
-    ## Classify & Detect Issues in a Citizen Complaint
-
-    Submit a raw complaint (text + optional image) and receive a structured
-    JSON response with:
-
-    - **primary_issue**: The dominant problem, its category, subcategory,
-      priority score (1–5), and model confidence.
-    - **secondary_issues**: Any co-occurring concerns found in the complaint.
-
-    ### Category Taxonomy (10 canonical labels)
-    1. Roads and Footpaths
-    2. Drainage and Sewage
-    3. Streetlighting
-    4. Waste and Sanitation
-    5. Water Supply
-    6. Parks and Public Spaces
-    7. Encroachment and Illegal
-    8. Noise and Pollution
-    9. Stray Animals
-    10. Other / Miscellaneous
-
-    ### Priority Score Guide
-    | Score | Meaning |
-    |-------|---------|
-    | 5     | Critical — immediate life-safety risk |
-    | 4     | High — injury or major damage within 24 h |
-    | 3     | Moderate — significant inconvenience |
-    | 2     | Minor — degraded service quality |
-    | 1     | Low — cosmetic / very minor |
-    """
+async def analyze_complaint(payload: AnalyzeV1Request) -> AnalyzeAPIResponse:
+    """Analyze a complaint with pre-LLM spatial duplicate short-circuit."""
     request_trace = str(uuid.uuid4())[:8]  # Short trace ID for log correlation
     logger.info(
-        "trace=%s | Received analyze request for complaint_id=%s",
+        "trace=%s | Received analyze request lat=%.6f lon=%.6f category=%s",
         request_trace,
-        payload.complaint_id,
+        payload.latitude,
+        payload.longitude,
+        payload.user_selected_category,
     )
 
-    # Delegate to the LLM service — all errors raised here are caught by the
-    # global exception handlers registered above.
-    result: AnalyzeResponse = await classify_complaint(payload)
+    parent_id = await find_spatial_duplicate(
+        pool=getattr(app.state, "db_pool", None),
+        user_selected_category=payload.user_selected_category,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+    )
+
+    if parent_id is not None:
+        logger.info(
+            "trace=%s | Duplicate found -> parent_id=%s | skipping LLM",
+            request_trace,
+            parent_id,
+        )
+        return AnalyzeAPIResponse(
+            is_duplicate=True,
+            parent_id=str(parent_id),
+            analysis=None,
+        )
+
+    result: AnalyzeResponse = await run_intelligence_pass(
+        text_description=payload.text_description,
+        image_base64=payload.image_base64,
+    )
 
     logger.info(
-        "trace=%s | Returning response for complaint_id=%s → %s (priority=%d)",
+        "trace=%s | Returning LLM analysis → %s (priority=%d)",
         request_trace,
-        payload.complaint_id,
         result.primary_issue.category,
         result.primary_issue.priority_score,
     )
-    return result
+    return AnalyzeAPIResponse(
+        is_duplicate=False,
+        parent_id=None,
+        analysis=result,
+    )
