@@ -1,0 +1,146 @@
+version: '3.9'
+services:
+
+  # ── PostgreSQL + PostGIS ────────────────────────────────────────────────────
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d   # runs 001–010 on first start
+    environment:
+      POSTGRES_USER:     resolvex
+      POSTGRES_PASSWORD: resolvex_dev
+      POSTGRES_DB:       resolvex
+    healthcheck:
+      test:     ['CMD-SHELL', 'pg_isready -U resolvex -d resolvex']
+      interval: 5s
+      timeout:  5s
+      retries:  10
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test:     ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout:  3s
+      retries:  10
+
+  # ── RabbitMQ ────────────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    restart: unless-stopped
+    ports:
+      - '5672:5672'    # AMQP
+      - '15672:15672'  # Management UI — http://localhost:15672
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: resolvex
+      RABBITMQ_DEFAULT_PASS: resolvex_dev
+    healthcheck:
+      test:     ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 10s
+      timeout:  5s
+      retries:  10
+
+  # ── MinIO (S3-compatible object storage) ────────────────────────────────────
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    ports:
+      - '9000:9000'   # S3 API
+      - '9001:9001'   # MinIO console — http://localhost:9001
+    volumes:
+      - miniodata:/data
+    environment:
+      MINIO_ROOT_USER:     resolvex
+      MINIO_ROOT_PASSWORD: resolvex_dev
+    # --console-address required to expose the management UI on a fixed port
+    command: server /data --console-address ':9001'
+    healthcheck:
+      test:     ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── API (Node.js/Express) ───────────────────────────────────────────────────
+  api:
+    build:
+      context:    ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '4000:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy   # wait for postgres to accept connections
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file: .env                   # loads all vars from .env at root
+    environment:
+      NODE_ENV:      development
+      APP_PORT:      4000
+      DATABASE_URL:  postgresql://resolvex:resolvex_dev@postgres:5432/resolvex
+      REDIS_URL:     redis://redis:6379
+      RABBITMQ_URL:  amqp://resolvex:resolvex_dev@rabbitmq:5672
+      S3_ENDPOINT:   minio
+      S3_PORT:       9000
+      S3_USE_SSL:    'false'
+      S3_ACCESS_KEY: resolvex
+      S3_SECRET_KEY: resolvex_dev
+      S3_BUCKET:     complaint-media
+      # S3_PUBLIC_URL accessible from browser (localhost not minio)
+      S3_PUBLIC_URL: http://localhost:9000
+    volumes:
+      - ./apps/api:/app              # live reload in dev
+      - /app/node_modules            # prevent host node_modules overwriting container's
+    healthcheck:
+      test:     ['CMD', 'curl', '-f', 'http://localhost:4000/health']
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── Web (Next.js PWA) ───────────────────────────────────────────────────────
+  web:
+    build:
+      context:    ./apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL:  http://localhost:4000/api/v1
+        NEXT_PUBLIC_WS_URL:   ws://localhost:4000
+        NEXT_PUBLIC_MODE:     demo
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      NODE_ENV:                development
+      NEXT_PUBLIC_API_URL:  http://localhost:4000/api/v1
+      NEXT_PUBLIC_WS_URL:   ws://localhost:4000
+      NEXT_PUBLIC_MODE:     demo
+   # volumes:
+    #  - ./apps/web:/app
+     # - /app/node_modules
+      #- /app/.next                   # prevent .next cache conflicts
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmqdata:
+  miniodata:
