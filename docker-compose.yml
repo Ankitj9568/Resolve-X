@@ -139,6 +139,46 @@ services:
      # - /app/node_modules
       #- /app/.next                   # prevent .next cache conflicts
 
+  # ── DBSCAN Clustering Service (Python/FastAPI) ───────────────────────────
+  dbscan:
+    build:
+      context:    ./DBScan_clustering_pipeline
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '8010:8010'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://resolvex:${POSTGRES_PASSWORD}@postgres:5432/resolvex
+    healthcheck:
+      test:     ['CMD', 'curl', '-f', 'http://localhost:8010/healthz']
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── Risk Scoring & Alerts Service (Python/FastAPI) ─────────────────────────
+  risk:
+    build:
+      context:    ./risk_scoring_and_alerts
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '8020:8020'
+    depends_on:
+      dbscan:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DBSCAN_SERVICE_URL: http://dbscan:8010
+    healthcheck:
+      test:     ['CMD', 'curl', '-f', 'http://localhost:8020/healthz']
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
 volumes:
   pgdata:
   redisdata:
