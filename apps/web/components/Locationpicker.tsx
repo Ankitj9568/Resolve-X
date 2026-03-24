@@ -5,7 +5,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
  
 // Fix Leaflet default icon broken by webpack asset hashing
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete ((L.Icon.Default as unknown as { prototype: { _getIconUrl?: string } }).prototype)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',

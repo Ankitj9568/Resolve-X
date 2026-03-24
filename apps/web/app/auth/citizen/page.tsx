@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../store/auth';
 import { requestOtp, verifyOtp } from '../../../utils/api';
+import type { ApiErrorLike } from '../../../utils/types';
 
 type Step = 'phone' | 'otp';
 
@@ -40,8 +41,9 @@ export default function CitizenAuth() {
       setPhone(cleaned);
       setStep('otp');
       startResendTimer();
-    } catch (err: any) {
-      setError(err.message ?? 'Failed to send OTP');
+    } catch (err) {
+      const apiError = err as ApiErrorLike;
+      setError(apiError.message ?? 'Failed to send OTP');
     } finally {
       setLoading(false);
     }
@@ -56,8 +58,9 @@ export default function CitizenAuth() {
       setToken(token);
       setRole('citizen');
       router.push('/citizen/home');
-    } catch (err: any) {
-      setError(err.message ?? 'Invalid code');
+    } catch (err) {
+      const apiError = err as ApiErrorLike;
+      setError(apiError.message ?? 'Invalid code');
     } finally {
       setLoading(false);
     }

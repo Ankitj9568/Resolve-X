@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../store/auth';
+import type { ApiErrorLike } from '../../../utils/types';
 
 type Step = 'credentials' | 'totp';
 
@@ -64,8 +65,9 @@ export default function StaffAuth() {
       const data = await staffLogin(employeeId.trim(), password);
       setUserId(data.user_id);
       setStep('totp');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      const apiError = err as ApiErrorLike;
+      setError(apiError.message ?? 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -80,8 +82,9 @@ export default function StaffAuth() {
       setToken(data.token);
       setRole(data.user.role);
       router.push(ROLE_LANDING[data.user.role] ?? '/admin/dashboard');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      const apiError = err as ApiErrorLike;
+      setError(apiError.message ?? 'Invalid code');
     } finally {
       setLoading(false);
     }

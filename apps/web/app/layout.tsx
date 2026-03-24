@@ -1,5 +1,6 @@
 ﻿// apps/web/app/layout.tsx
 import type { Metadata, Viewport } from 'next';
+import Link from 'next/link';
 import SandboxBanner from '../components/SandboxBanner';
 import './globals.css';
 
@@ -29,12 +30,12 @@ export default function RootLayout({
       <body className="bg-gray-50 text-gray-900 antialiased">
         <SandboxBanner demoMode={demoMode} />
         <nav className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
-          <a href="/" className="font-bold text-indigo-600 tracking-tight">
+          <Link href="/" className="font-bold text-indigo-600 tracking-tight">
             ResolveX
-          </a>
-          <a href="/file" className="text-sm text-indigo-600 font-medium hover:underline">
+          </Link>
+          <Link href="/file" className="text-sm text-indigo-600 font-medium hover:underline">
             Report issue
-          </a>
+          </Link>
         </nav>
         <div className="min-h-screen">{children}</div>
       </body>

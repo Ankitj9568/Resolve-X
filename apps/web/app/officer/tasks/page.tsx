@@ -4,11 +4,13 @@
 // "Verified on ground" button triggers hollow→solid marker transition.
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter }            from 'next/navigation';
 import { useAuthStore }         from '../../../store/auth';
 import { updateStatus, verifyComplaint } from '../../../utils/api';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner            from '../../../components/SandboxBanner';
+import type { Complaint } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
 const BASE      = process.env.NEXT_PUBLIC_API_URL;
@@ -20,13 +22,14 @@ const STATUS_COLORS: Record<string, string> = {
   resolved:    'bg-green-100 text-green-700',
 };
 
-function SLABar({ deadline, createdAt }: { deadline: string; createdAt: string }) {
+function SLABar({ deadline, createdAt, now }: { deadline: string; createdAt: string; now: number }) {
   const total   = new Date(deadline).getTime() - new Date(createdAt).getTime();
-  const elapsed = Date.now() - new Date(createdAt).getTime();
+  const elapsed = now - new Date(createdAt).getTime();
   const pct     = Math.min(100, (elapsed / total) * 100);
   const color   = pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-400' : 'bg-green-400';
-  const h       = Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 3600000));
-  const m       = Math.max(0, Math.floor(((new Date(deadline).getTime() - Date.now()) % 3600000) / 60000));
+  const remaining = new Date(deadline).getTime() - now;
+  const h       = Math.max(0, Math.floor(remaining / 3600000));
+  const m       = Math.max(0, Math.floor((remaining % 3600000) / 60000));
   return (
     <div className="mt-2">
       <div className="flex justify-between text-xs text-gray-400 mb-1">
@@ -45,9 +48,10 @@ function SLABar({ deadline, createdAt }: { deadline: string; createdAt: string }
 export default function OfficerTasks() {
   const router          = useRouter();
   const { token, role } = useAuthStore();
-  const [tasks, setTasks]           = useState<any[]>([]);
+  const [tasks, setTasks]           = useState<Complaint[]>([]);
   const [loading, setLoading]       = useState(true);
   const [actionId, setActionId]     = useState<string | null>(null);
+  const [now, setNow]               = useState(() => Date.now());
 
   // Redirect if not officer role
   useEffect(() => {
@@ -64,7 +68,7 @@ export default function OfficerTasks() {
       });
       const data = await res.json();
       // Sort by SLA urgency — soonest deadline first
-      const sorted = (data.complaints ?? []).sort((a: any, b: any) =>
+      const sorted = (data.complaints ?? []).sort((a: Complaint, b: Complaint) =>
         new Date(a.sla_deadline ?? 0).getTime() - new Date(b.sla_deadline ?? 0).getTime()
       );
       setTasks(sorted);
@@ -77,6 +81,12 @@ export default function OfficerTasks() {
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   // Live updates via WebSocket
   useEffect(() => {
     const remove = addWebSocketListener((event) => {
@@ -84,15 +94,17 @@ export default function OfficerTasks() {
         fetchTasks();
       }
       if (event.type === 'complaint.status_updated') {
+        const newStatus = event.new_status;
+        if (!newStatus) return;
         setTasks(prev => prev.map(t =>
-          t.id === event.complaint_id ? { ...t, status: event.new_status } : t
+          t.id === event.complaint_id ? { ...t, status: newStatus } : t
         ));
       }
     });
     return remove;
   }, [fetchTasks]);
 
-  const handleAction = async (task: any, status: string) => {
+  const handleAction = async (task: Complaint, status: string) => {
     if (!token) return;
     setActionId(task.id + status);
     try {
@@ -103,7 +115,7 @@ export default function OfficerTasks() {
     }
   };
 
-  const handleVerify = async (task: any) => {
+  const handleVerify = async (task: Complaint) => {
     if (!token) return;
     setActionId(task.id + 'verify');
     try {
@@ -164,7 +176,7 @@ export default function OfficerTasks() {
                 </div>
 
                 {task.sla_deadline && task.created_at && (
-                  <SLABar deadline={task.sla_deadline} createdAt={task.created_at} />
+                  <SLABar deadline={task.sla_deadline} createdAt={task.created_at} now={now} />
                 )}
 
                 {/* Action buttons */}
@@ -200,11 +212,11 @@ export default function OfficerTasks() {
                       Verified on ground
                     </button>
                   )}
-                  <a href="/admin/map"
+                  <Link href="/admin/map"
                     className="px-3 py-1.5 text-xs bg-gray-50 text-gray-600
                                rounded-lg hover:bg-gray-100 font-medium transition-colors">
                     View on map
-                  </a>
+                  </Link>
                 </div>
               </div>
             ))}

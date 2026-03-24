@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../store/auth';
 import SandboxBanner from '../../../components/SandboxBanner';
+import type { Complaint } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
 const BASE      = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
@@ -27,7 +28,7 @@ const CATEGORY_ICONS: Record<string, string> = {
 export default function CitizenComplaints() {
   const router          = useRouter();
   const { token }       = useAuthStore();
-  const [complaints, setComplaints] = useState<any[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading]       = useState(true);
   const [filter, setFilter]         = useState('all');
 

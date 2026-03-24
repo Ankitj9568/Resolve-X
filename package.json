@@ -1,0 +1,29 @@
+{
+  "name": "resolve-x",
+  "version": "1.0.0",
+  "description": "Created branch 'Abdul'",
+  "main": "seed.js",
+  "type": "module",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "lint": "npm --prefix apps/web run lint",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/epsilonstar-02/Resolve-X.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/epsilonstar-02/Resolve-X/issues"
+  },
+  "homepage": "https://github.com/epsilonstar-02/Resolve-X#readme",
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "pg": "^8.20.0"
+  }
+}

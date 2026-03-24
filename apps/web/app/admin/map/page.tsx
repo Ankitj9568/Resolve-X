@@ -1,12 +1,18 @@
 'use client';
 
- 
-import { useEffect, useState, useCallback, useRef } from 'react';
+
+import { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuthStore }         from '../../../store/auth';
 import { getMapMarkers, getWards, triggerDemoReset } from '../../../utils/api';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner            from '../../../components/SandboxBanner';
+import type {
+  ApiErrorLike,
+  GeoJsonFeatureCollection,
+  MapMarker,
+  RiskFeatureProperties,
+} from '../../../utils/types';
  
 // Wrap the entire Leaflet map in a single dynamic import — SSR must be false
 const LeafletMap = dynamic(() => import('../../../components/AdminLeafletMap'), {
@@ -22,9 +28,9 @@ const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
  
 export default function AdminMapPage() {
   const { token, role } = useAuthStore();
-  const [markers, setMarkers]   = useState<any[]>([]);
-  const [wards, setWards]       = useState<any>(null);
-  const [riskData, setRiskData] = useState<any>(null);
+  const [markers, setMarkers]   = useState<MapMarker[]>([]);
+  const [wards, setWards]       = useState<GeoJsonFeatureCollection | null>(null);
+  const [riskData, setRiskData] = useState<GeoJsonFeatureCollection<RiskFeatureProperties> | null>(null);
   const [resetting, setResetting] = useState(false);
  
   const fetchMarkers = useCallback(async () => {
@@ -52,18 +58,19 @@ export default function AdminMapPage() {
     } catch { /* non-fatal */ }
   }, [token]);
  
-  const handleDemoReset = async () => {
+  const handleDemoReset = useCallback(async () => {
     if (!token) return;
     setResetting(true);
     try {
       await triggerDemoReset(token);
       // Map refresh triggered by demo.reset WebSocket event
-    } catch (err: any) {
-      console.error('Demo reset failed:', err.message);
+    } catch (err) {
+      const apiError = err as ApiErrorLike;
+      console.error('Demo reset failed:', apiError.message);
     } finally {
       setResetting(false);
     }
-  };
+  }, [token]);
  
   // Initial data load
   useEffect(() => {
@@ -102,8 +109,7 @@ export default function AdminMapPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, token]);
+  }, [handleDemoReset, role]);
  
   return (
     <main className="min-h-screen bg-gray-50">

@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { useAuthStore } from '../../../store/auth';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner from '../../../components/SandboxBanner';
+import type { Complaint } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
 const BASE      = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
@@ -36,15 +37,16 @@ const CATEGORY_LABELS: Record<string, string> = {
   'CAT-10': 'Other',
 };
 
-function SLAProgress({ slaDeadline, createdAt, status }: {
-  slaDeadline: string; createdAt: string; status: string;
+function SLAProgress({ slaDeadline, createdAt, status, now }: {
+  slaDeadline: string; createdAt: string; status: string; now: number;
 }) {
   if (status === 'resolved' || status === 'closed') return null;
   const total   = new Date(slaDeadline).getTime() - new Date(createdAt).getTime();
-  const elapsed = Date.now() - new Date(createdAt).getTime();
+  const elapsed = now - new Date(createdAt).getTime();
   const pct     = Math.min(100, Math.round((elapsed / total) * 100));
   const color   = pct >= 100 ? 'bg-red-400' : pct >= 80 ? 'bg-amber-400' : 'bg-green-400';
-  const h       = Math.max(0, Math.floor((new Date(slaDeadline).getTime() - Date.now()) / 3600000));
+  const remaining = new Date(slaDeadline).getTime() - now;
+  const h       = Math.max(0, Math.floor(remaining / 3600000));
   const label   = pct >= 100 ? 'Overdue' : `${h}h left`;
 
   return (
@@ -66,10 +68,11 @@ function SLAProgress({ slaDeadline, createdAt, status }: {
 export default function CitizenHome() {
   const router          = useRouter();
   const { token, role, clear } = useAuthStore();
-  const [complaints, setComplaints] = useState<any[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading]       = useState(true);
   const [greeting, setGreeting]     = useState('');
   const [visible, setVisible]       = useState(false);
+  const [now, setNow]               = useState(() => Date.now());
 
   // Redirect if not logged in
   useEffect(() => {
@@ -101,13 +104,21 @@ export default function CitizenHome() {
 
   useEffect(() => { fetchComplaints(); }, [fetchComplaints]);
 
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   // Live status updates via WebSocket
   useEffect(() => {
     const remove = addWebSocketListener((event) => {
       if (event.type === 'complaint.status_updated') {
+        const newStatus = event.new_status;
+        if (!newStatus) return;
         setComplaints(prev =>
           prev.map(c => c.id === event.complaint_id
-            ? { ...c, status: event.new_status }
+            ? { ...c, status: newStatus }
             : c
           )
         );
@@ -284,6 +295,7 @@ export default function CitizenHome() {
                             slaDeadline={c.sla_deadline}
                             createdAt={c.created_at}
                             status={c.status}
+                            now={now}
                           />
                         )}
                       </div>

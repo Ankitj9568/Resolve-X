@@ -1,7 +1,12 @@
-const withPWA = require('@ducanh2912/next-pwa').default({
+import nextPwa from '@ducanh2912/next-pwa';
+import { fileURLToPath } from 'node:url';
+
+const withPWA = nextPwa({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development',
 });
+
+const workspaceRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -12,7 +17,9 @@ const nextConfig = {
       { protocol: 'http', hostname: 'minio' },
     ],
   },
-  turbopack: {},
+  turbopack: {
+    root: workspaceRoot,
+  },
 };
 
-module.exports = withPWA(nextConfig);
+export default withPWA(nextConfig);

@@ -16,7 +16,7 @@ const minioClient = new Minio.Client({
   port:      parseInt(process.env.S3_PORT || '9000'),
   useSSL:    process.env.S3_USE_SSL === 'true',
   accessKey: process.env.S3_ACCESS_KEY || 'resolvex',
-  secretKey: process.env.S3_SECRET_KEY || 'resolvex_dev',
+  secretKey: process.env.S3_SECRET_KEY || 'local-dev-secret',
 });
  
 const BUCKET = process.env.S3_BUCKET || 'complaint-media';

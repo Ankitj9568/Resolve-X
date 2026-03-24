@@ -30,7 +30,7 @@ async function connect() {
   if (isConnecting) return;
   isConnecting = true;
 
-  const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://resolvex:resolvex_dev@localhost:5672';
+  const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://localhost:5672';
 
   try {
     connection = await amqplib.connect(rabbitUrl);

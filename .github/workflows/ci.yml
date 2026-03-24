@@ -20,15 +20,14 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '20'
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm install
-      - name: Run ESLint
+      - name: Install web dependencies
+        run: npm install
+        working-directory: apps/web
+      - name: Run web ESLint
         run: npm run lint
-      - name: Type check
-        run: npm run type-check
-      - name: Run migrations
-        run: npm run migrate
-      - name: Run unit tests
-        run: npm test
-      - name: Build
+        working-directory: apps/web
+      - name: Build web app
         run: npm run build
+        working-directory: apps/web

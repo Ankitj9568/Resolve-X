@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useComplaintDraft } from '../../store/complaintDraft';
 import { useAuthStore } from '../../store/auth';
 import { postComplaint } from '../../utils/api';
 import IssueAnalysisCard from '../../components/IssueAnalysisCard';
+import type { ApiErrorLike, SecondaryIssue } from '../../utils/types';
 
 // Leaflet must be dynamically imported — it accesses window on load
 const LocationPicker = dynamic(
@@ -51,7 +52,7 @@ export default function ComplaintFilingWizard() {
   const [error, setError]           = useState<string | null>(null);
   const [complaintId, setComplaintId] = useState<string | null>(null);
   const [slaDeadline, setSlaDeadline] = useState<string | null>(null);
-  const [secondaryIssues, setSecondaryIssues] = useState<any[]>([]);
+  const [, setSecondaryIssues] = useState<SecondaryIssue[]>([]);
 
   // ── Screen 1: Category ──────────────────────────────────────────────────────
 
@@ -128,8 +129,6 @@ export default function ComplaintFilingWizard() {
   const Screen3 = () => {
     const [uploading, setUploading] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
-    const selectedCat = CATEGORIES.find(c => c.id === category);
-
     const handleUpload = async (files: FileList) => {
       if (!files.length) return;
       if (fileUrls.length >= 3) {
@@ -187,7 +186,7 @@ export default function ComplaintFilingWizard() {
           }
         </button>
         <input
-         title='h'
+          title="Upload supporting evidence"
           ref={fileRef}
           type="file"
           accept="image/jpeg,image/png,video/mp4"
@@ -372,8 +371,9 @@ export default function ComplaintFilingWizard() {
       setSecondaryIssues(result.secondary_issues ?? []);
       reset(); // clear draft from store
       setStep(5);
-    } catch (err: any) {
-      setError(err.message ?? 'Something went wrong — please try again');
+    } catch (err) {
+      const apiError = err as ApiErrorLike;
+      setError(apiError.message ?? 'Something went wrong — please try again');
     } finally {
       setLoading(false);
     }

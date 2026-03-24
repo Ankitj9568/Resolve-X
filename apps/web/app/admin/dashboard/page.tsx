@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter }            from 'next/navigation';
 import { useAuthStore }         from '../../../store/auth';
 import { getComplaints, updateStatus } from '../../../utils/api';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner            from '../../../components/SandboxBanner';
+import type { Complaint } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
 
@@ -18,14 +20,15 @@ const STATUS_COLORS: Record<string, string> = {
   closed:      'bg-gray-200 text-gray-600',
 };
 
-function SLABar({ slaDeadline, createdAt }: { slaDeadline: string; createdAt: string }) {
+function SLABar({ slaDeadline, createdAt, now }: { slaDeadline: string; createdAt: string; now: number }) {
   const total   = new Date(slaDeadline).getTime() - new Date(createdAt).getTime();
-  const elapsed = Date.now() - new Date(createdAt).getTime();
+  const elapsed = now - new Date(createdAt).getTime();
   const pct     = Math.min(100, Math.round((elapsed / total) * 100));
   const color   = pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-400' : 'bg-green-400';
 
-  const h = Math.max(0, Math.floor((new Date(slaDeadline).getTime() - Date.now()) / 3600000));
-  const m = Math.max(0, Math.floor(((new Date(slaDeadline).getTime() - Date.now()) % 3600000) / 60000));
+  const remaining = new Date(slaDeadline).getTime() - now;
+  const h = Math.max(0, Math.floor(remaining / 3600000));
+  const m = Math.max(0, Math.floor((remaining % 3600000) / 60000));
   const label = pct >= 100 ? 'Overdue' : `${h}h ${m}m`;
 
   return (
@@ -44,10 +47,11 @@ function SLABar({ slaDeadline, createdAt }: { slaDeadline: string; createdAt: st
 export default function AdminDashboard() {
   const router              = useRouter();
   const { token, role }     = useAuthStore();
-  const [complaints, setComplaints] = useState<any[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [filter, setFilter]         = useState('all');
   const [loading, setLoading]       = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [now, setNow]               = useState(() => Date.now());
 
   // Redirect if not staff
   useEffect(() => {
@@ -62,7 +66,7 @@ export default function AdminDashboard() {
       const params = filter !== 'all' ? `?status=${filter}` : '';
       const data = await getComplaints(token, params);
       // Sort by SLA urgency — most critical first
-      const sorted = (data.complaints ?? []).sort((a: any, b: any) => {
+      const sorted = (data.complaints ?? []).sort((a, b) => {
         const aTime = new Date(a.sla_deadline ?? 0).getTime();
         const bTime = new Date(b.sla_deadline ?? 0).getTime();
         return aTime - bTime;
@@ -77,13 +81,21 @@ export default function AdminDashboard() {
 
   useEffect(() => { fetchComplaints(); }, [fetchComplaints]);
 
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   // WebSocket — update specific complaint in place on status change
   useEffect(() => {
     const remove = addWebSocketListener((event) => {
       if (event.type === 'complaint.status_updated') {
+        const newStatus = event.new_status;
+        if (!newStatus) return;
         setComplaints(prev =>
           prev.map(c =>
-            c.id === event.complaint_id ? { ...c, status: event.new_status } : c
+            c.id === event.complaint_id ? { ...c, status: newStatus } : c
           )
         );
       }
@@ -173,7 +185,7 @@ export default function AdminDashboard() {
                       <p className="text-xs text-gray-500 truncate">{c.description}</p>
                     )}
                     {c.sla_deadline && c.created_at && (
-                      <SLABar slaDeadline={c.sla_deadline} createdAt={c.created_at} />
+                      <SLABar slaDeadline={c.sla_deadline} createdAt={c.created_at} now={now} />
                     )}
                   </div>
 
@@ -196,13 +208,13 @@ export default function AdminDashboard() {
                       >
                         Resolve
                       </button>
-                      <a
+                      <Link
                         href="/admin/map"
                         className="px-2.5 py-1.5 text-xs bg-gray-50 text-gray-600 rounded-lg
                                    hover:bg-gray-100 transition-colors font-medium"
                       >
                         Map
-                      </a>
+                      </Link>
                     </div>
                   )}
                 </div>

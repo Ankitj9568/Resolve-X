@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import { demoLogin } from '../utils/api';
+import type { ApiErrorLike } from '../utils/types';
  
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
  
@@ -53,8 +54,9 @@ export default function RolePicker() {
       setToken(token);
       setRole('citizen');
       router.push('/citizen/home');
-    } catch (err: any) {
-      setError(err.message ?? 'Demo login failed');
+    } catch (err) {
+      const apiError = err as ApiErrorLike;
+      setError(apiError.message ?? 'Demo login failed');
     } finally {
       setLoading(false);
     }

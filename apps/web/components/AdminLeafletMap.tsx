@@ -7,6 +7,17 @@ import { useEffect } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Polygon, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import type {
+  GeoJsonFeature,
+  GeoJsonFeatureCollection,
+  MapMarker,
+  RiskFeatureProperties,
+} from '../utils/types';
+
+interface WardFeatureProperties {
+  id?: string;
+  name?: string;
+}
 
 // Category colour map for markers
 const CATEGORY_COLORS: Record<string, string> = {
@@ -29,7 +40,13 @@ const RISK_COLORS = {
   low:      '#4ade8044',
 };
 
-function markerOptions(marker: any) {
+function toLatLng(point: number[]): [number, number] | null {
+  const [lng, lat] = point;
+  if (typeof lng !== 'number' || typeof lat !== 'number') return null;
+  return [lat, lng];
+}
+
+function markerOptions(marker: MapMarker) {
   const color = CATEGORY_COLORS[marker.category] ?? '#9ca3af';
   const isHollow = marker.marker_type === 'hollow';
   const isResolved = marker.status === 'resolved';
@@ -74,9 +91,9 @@ function MapLegend() {
 }
 
 interface Props {
-  markers:  any[];
-  wards:    any;   // GeoJSON FeatureCollection
-  riskData: any;   // GeoJSON FeatureCollection with risk_tier
+  markers:  MapMarker[];
+  wards:    GeoJsonFeatureCollection<WardFeatureProperties> | null;
+  riskData: GeoJsonFeatureCollection<RiskFeatureProperties> | null;
 }
 
 export default function AdminLeafletMap({ markers, wards, riskData }: Props) {
@@ -92,10 +109,10 @@ export default function AdminLeafletMap({ markers, wards, riskData }: Props) {
       />
 
       {/* Risk heatmap — filled polygons per ward */}
-      {riskData?.features?.map((feature: any) => {
-        const coords = feature.geometry?.coordinates?.[0]?.map(
-          ([lng, lat]: [number, number]) => [lat, lng] as [number, number]
-        );
+      {riskData?.features?.map((feature: GeoJsonFeature<RiskFeatureProperties>) => {
+        const coords = feature.geometry?.coordinates?.[0]
+          ?.map(toLatLng)
+          .filter((point): point is [number, number] => point !== null);
         if (!coords) return null;
         const tier  = feature.properties.risk_tier as keyof typeof RISK_COLORS;
         const color = RISK_COLORS[tier] ?? RISK_COLORS.low;
@@ -119,18 +136,18 @@ export default function AdminLeafletMap({ markers, wards, riskData }: Props) {
       })}
 
       {/* Ward boundary outlines */}
-      {wards?.features?.map((feature: any) => {
-        const coords = feature.geometry?.coordinates?.[0]?.map(
-          ([lng, lat]: [number, number]) => [lat, lng] as [number, number]
-        );
+      {wards?.features?.map((feature: GeoJsonFeature<WardFeatureProperties>, index: number) => {
+        const coords = feature.geometry?.coordinates?.[0]
+          ?.map(toLatLng)
+          .filter((point): point is [number, number] => point !== null);
         if (!coords) return null;
         return (
           <Polygon
-            key={feature.properties.id}
+            key={String(feature.properties.id ?? `ward-${index}`)}
             positions={coords}
             pathOptions={{ color: '#6366f1', fillOpacity: 0, weight: 1, dashArray: '6 4' }}
           >
-            <Popup>{feature.properties.name}</Popup>
+            <Popup>{feature.properties.name ?? `Ward ${index + 1}`}</Popup>
           </Polygon>
         );
       })}

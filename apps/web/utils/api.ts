@@ -3,6 +3,13 @@
 // Attaches Authorization header from token argument.
 // Throws a typed error with the server's error message on non-2xx responses.
 //const BASE = process.env.NEXT_PUBLIC_API_URL;
+import type {
+  Complaint,
+  GeoJsonFeatureCollection,
+  MapMarker,
+  SecondaryIssue,
+} from './types';
+
 const BASE = "http://localhost:4000/api/v1"; 
 
 console.log('API BASE URL:', BASE);
@@ -80,12 +87,7 @@ interface PostComplaintPayload {
 interface PostComplaintResponse {
   complaint_id:     string;
   sla_deadline:     string;
-  secondary_issues: Array<{
-    category:   string;
-    label:      string;
-    confidence: number;
-    dept:       string;
-  }>;
+  secondary_issues: SecondaryIssue[];
 }
 
 export const postComplaint = (
@@ -99,7 +101,7 @@ export const postComplaint = (
   });
 
 export const getComplaint = (id: string, token?: string) =>
-  request<any>(`/complaints/${id}`, { token });
+  request<Complaint>(`/complaints/${id}`, { token });
 
 export const updateStatus = (id: string, status: string, token: string) =>
   request(`/complaints/${id}/status`, {
@@ -114,10 +116,10 @@ export const verifyComplaint = (id: string, token: string) =>
 // ── GIS ───────────────────────────────────────────────────────────────────────
 
 export const getMapMarkers = (token?: string) =>
-  request<{ markers: any[] }>('/gis/complaints/map', { token });
+  request<{ markers: MapMarker[] }>('/gis/complaints/map', { token });
 
 export const getWards = () =>
-  request<any>('/gis/wards');
+  request<GeoJsonFeatureCollection>('/gis/wards');
 
 export const triggerDemoReset = (token: string) =>
   request('/admin/demo/reset', { method: 'DELETE', token });
@@ -137,4 +139,4 @@ export const submitFeedback = (
   });
 
 export const getComplaints = (token: string, queryString = "") =>
-  request<{ complaints: any[] }>(`/complaints${queryString}`, { token });
+  request<{ complaints: Complaint[] }>(`/complaints${queryString}`, { token });

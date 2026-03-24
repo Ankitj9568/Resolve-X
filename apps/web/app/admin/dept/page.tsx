@@ -4,10 +4,12 @@
 // Spec: workload per officer + dept SLA compliance + all dept tasks
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../store/auth';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner from '../../../components/SandboxBanner';
+import type { Complaint } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
 const BASE      = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
@@ -24,8 +26,9 @@ const STATUS_COLORS: Record<string, string> = {
 export default function DeptOverview() {
   const router              = useRouter();
   const { token, role }     = useAuthStore();
-  const [complaints, setComplaints] = useState<any[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [loading, setLoading]       = useState(true);
+  const [now, setNow]               = useState(() => Date.now());
 
   useEffect(() => {
     if (!token) { router.replace('/'); return; }
@@ -48,12 +51,20 @@ export default function DeptOverview() {
   useEffect(() => {
     const remove = addWebSocketListener((event) => {
       if (event.type === 'complaint.status_updated') {
+        const newStatus = event.new_status;
+        if (!newStatus) return;
         setComplaints(prev => prev.map(c =>
-          c.id === event.complaint_id ? { ...c, status: event.new_status } : c
+          c.id === event.complaint_id ? { ...c, status: newStatus } : c
         ));
       }
     });
     return remove;
+  }, []);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(interval);
   }, []);
 
   // Derive workload per officer
@@ -68,7 +79,6 @@ export default function DeptOverview() {
   });
 
   // SLA compliance
-  const now      = Date.now();
   const active   = complaints.filter(c => !['resolved','closed'].includes(c.status));
   const overdue  = active.filter(c => c.sla_deadline && new Date(c.sla_deadline).getTime() < now);
   const slaRate  = active.length ? Math.round(((active.length - overdue.length) / active.length) * 100) : 100;
@@ -84,7 +94,7 @@ export default function DeptOverview() {
           <p className="text-xs text-gray-400">Department head</p>
           <h1 className="text-lg font-semibold text-gray-900">Dept overview</h1>
         </div>
-        <a href="/admin/map" className="text-xs text-indigo-500 hover:underline">View map →</a>
+        <Link href="/admin/map" className="text-xs text-indigo-500 hover:underline">View map →</Link>
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">

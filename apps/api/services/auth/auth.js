@@ -17,18 +17,40 @@ const db = new Pool({ connectionString: process.env.DATABASE_URL });
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const fs = require('fs');
-const JWT_PRIVATE_KEY = (() => {
-  if (process.env.JWT_PRIVATE_KEY) return process.env.JWT_PRIVATE_KEY;
-  try { return fs.readFileSync('./keys/private.pem', 'utf8'); } catch(e) {}
-  try { return fs.readFileSync('/app/keys/private.pem', 'utf8'); } catch(e) {}
-  throw new Error('JWT_PRIVATE_KEY not found');
+
+function readKeyFile(paths) {
+  for (const path of paths) {
+    try {
+      return fs.readFileSync(path, 'utf8');
+    } catch (e) {}
+  }
+  return null;
+}
+
+const jwtKeyPair = (() => {
+  const privateKey = process.env.JWT_PRIVATE_KEY
+    || readKeyFile(['./keys/private.pem', '/app/keys/private.pem']);
+  const publicKey = process.env.JWT_PUBLIC_KEY
+    || readKeyFile(['./keys/public.pem', '/app/keys/public.pem']);
+
+  if (privateKey && publicKey) {
+    return { privateKey, publicKey };
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn('JWT keys not found; generating an ephemeral development key pair.');
+    return crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+  }
+
+  throw new Error('JWT keys not found. Set JWT_PRIVATE_KEY and JWT_PUBLIC_KEY.');
 })();
-const JWT_PUBLIC_KEY = (() => {
-  if (process.env.JWT_PUBLIC_KEY) return process.env.JWT_PUBLIC_KEY;
-  try { return fs.readFileSync('./keys/public.pem', 'utf8'); } catch(e) {}
-  try { return fs.readFileSync('/app/keys/public.pem', 'utf8'); } catch(e) {}
-  throw new Error('JWT_PUBLIC_KEY not found');
-})();
+
+const JWT_PRIVATE_KEY = jwtKeyPair.privateKey;
+const JWT_PUBLIC_KEY = jwtKeyPair.publicKey;
 const JWT_ALGORITHM   = 'RS256';
 
 const ACCESS_EXPIRY = {

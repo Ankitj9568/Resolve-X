@@ -211,3 +211,4 @@ node_modules/
 .next/
 
 *.env
+apps/api/keys/*.pem

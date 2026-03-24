@@ -4,10 +4,12 @@
 // Spec: all-dept + risk alerts, no WHERE filter, PII masked, early warnings
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../store/auth';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner from '../../../components/SandboxBanner';
+import type { Complaint, GeoJsonFeature, RiskFeatureProperties } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
 const BASE      = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
@@ -19,13 +21,15 @@ const RISK_CONFIG = {
   low:      { color: 'bg-green-100 text-green-700 border-green-200',   dot: 'bg-green-400'  },
 };
 
+type RiskFeature = GeoJsonFeature<RiskFeatureProperties>;
+
 export default function CityCommand() {
   const router          = useRouter();
   const { token, role } = useAuthStore();
 
-  const [complaints, setComplaints]   = useState<any[]>([]);
-  const [riskData, setRiskData]       = useState<any[]>([]);
-  const [warnings, setWarnings]       = useState<any[]>([]);
+  const [complaints, setComplaints]   = useState<Complaint[]>([]);
+  const [riskData, setRiskData]       = useState<RiskFeature[]>([]);
+  const [warnings, setWarnings]       = useState<RiskFeature[]>([]);
   const [loading, setLoading]         = useState(true);
   const [resetting, setResetting]     = useState(false);
   const [activeTab, setActiveTab]     = useState<'feed'|'risk'|'dept'>('feed');
@@ -46,21 +50,36 @@ export default function CityCommand() {
       const riskJson = await riskRes.json();
       setComplaints(compData.complaints ?? []);
 
-      const features = riskJson.features ?? [];
+      const features: RiskFeature[] = riskJson.features ?? [];
       setRiskData(features);
-      setWarnings(features.filter((f: any) =>
-        ['high','critical'].includes(f.properties?.risk_tier)
-      ));
+      setWarnings(features.filter((f) => {
+        const tier = f.properties?.risk_tier;
+        return tier === 'high' || tier === 'critical';
+      }));
     } catch { /* non-fatal */ } finally { setLoading(false); }
   }, [token]);
+
+  const handleDemoReset = useCallback(async () => {
+    if (!token) return;
+    setResetting(true);
+    try {
+      await fetch(`${BASE}/admin/demo/reset`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      fetchAll();
+    } catch { /* non-fatal */ } finally { setResetting(false); }
+  }, [fetchAll, token]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   useEffect(() => {
     const remove = addWebSocketListener((event) => {
       if (event.type === 'complaint.status_updated') {
+        const newStatus = event.new_status;
+        if (!newStatus) return;
         setComplaints(prev => prev.map(c =>
-          c.id === event.complaint_id ? { ...c, status: event.new_status } : c
+          c.id === event.complaint_id ? { ...c, status: newStatus } : c
         ));
       }
       if (event.type === 'sla.escalation') fetchAll();
@@ -82,19 +101,7 @@ export default function CityCommand() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [token]);
-
-  const handleDemoReset = async () => {
-    if (!token) return;
-    setResetting(true);
-    try {
-      await fetch(`${BASE}/admin/demo/reset`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      fetchAll();
-    } catch { /* non-fatal */ } finally { setResetting(false); }
-  };
+  }, [handleDemoReset]);
 
   // City-wide KPIs
   const total     = complaints.length;
@@ -122,7 +129,7 @@ export default function CityCommand() {
           <h1 className="text-lg font-semibold text-gray-900">ResolveX Command</h1>
         </div>
         <div className="flex items-center gap-3">
-          <a href="/admin/map" className="text-xs text-indigo-500 hover:underline">Live map →</a>
+          <Link href="/admin/map" className="text-xs text-indigo-500 hover:underline">Live map →</Link>
           {DEMO_MODE && (
             <button
               onClick={handleDemoReset}
@@ -141,7 +148,7 @@ export default function CityCommand() {
         {/* Early warnings */}
         {warnings.length > 0 && (
           <div className="space-y-2">
-            {warnings.map((w: any, i: number) => {
+            {warnings.map((w, i: number) => {
               const tier = w.properties?.risk_tier ?? 'high';
               const cfg  = RISK_CONFIG[tier as keyof typeof RISK_CONFIG] ?? RISK_CONFIG.high;
               return (
@@ -214,7 +221,7 @@ export default function CityCommand() {
           <div className="space-y-2">
             {riskData.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">No risk data available</p>
-            ) : riskData.map((f: any, i: number) => {
+            ) : riskData.map((f, i: number) => {
               const tier  = f.properties?.risk_tier ?? 'low';
               const score = f.properties?.risk_score ?? 0;
               const cfg   = RISK_CONFIG[tier as keyof typeof RISK_CONFIG] ?? RISK_CONFIG.low;
