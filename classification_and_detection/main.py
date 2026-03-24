@@ -20,7 +20,6 @@ Environment variables (or .env file)
     NIM_API_KEY=nvapi-xxxxxxxxxxxxxxxxxxxx
     NIM_BASE_URL=https://integrate.api.nvidia.com/v1   # default
     NIM_MODEL=meta/llama-3.1-8b-instruct               # text model
-    NIM_VISION_MODEL=nvidia/llama-3.1-nemotron-nano-vl-8b-v1
 """
 
 from __future__ import annotations
@@ -54,7 +53,6 @@ class AnalyzeV1Request(BaseModel):
     """Incoming payload for POST /api/v1/analyze."""
 
     text_description: str = Field(..., min_length=10, max_length=4_000)
-    image_base64: str | None = None
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     user_selected_category: str = Field(..., min_length=1, max_length=100)
@@ -282,7 +280,6 @@ async def analyze_complaint(payload: AnalyzeV1Request) -> AnalyzeAPIResponse:
 
     result: AnalyzeResponse = await run_intelligence_pass(
         text_description=payload.text_description,
-        image_base64=payload.image_base64,
     )
 
     logger.info(

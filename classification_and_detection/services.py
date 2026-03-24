@@ -101,12 +101,10 @@ async def find_spatial_duplicate(
 
 async def run_intelligence_pass(
     text_description: str,
-    image_base64: str | None,
 ) -> AnalyzeResponse:
     """Build normalized LLM request object and run classification."""
     request = AnalyzeRequest(
         complaint_id=uuid.uuid4(),
         text_description=text_description,
-        image_base64=image_base64,
     )
     return await classify_complaint(request)

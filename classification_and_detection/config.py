@@ -32,6 +32,7 @@ class Settings(BaseSettings):
         env_file=".env",          # Load from .env in dev; ignored if missing
         env_file_encoding="utf-8",
         case_sensitive=False,     # NIM_API_KEY == nim_api_key
+        extra="ignore",           # Ignore extra keys like NIM_VISION_MODEL in .env
     )
 
     # ── NVIDIA NIM / OpenAI-compatible LLM ─────────────────────────────────────
@@ -51,14 +52,6 @@ class Settings(BaseSettings):
         description=(
             "Text model identifier as listed in the NVIDIA API catalog. "
             "Must be available to your API key."
-        ),
-    )
-    nim_vision_model: str = Field(
-        default="nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
-        alias="NIM_VISION_MODEL",
-        description=(
-            "Multimodal model identifier used when an image is provided. "
-            "Use the full canonical NVIDIA model slug."
         ),
     )
 

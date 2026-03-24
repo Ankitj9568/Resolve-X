@@ -50,8 +50,6 @@ class AnalyzeRequest(BaseModel):
 
     complaint_id   : Stable identifier used for idempotency and tracing.
     text_description: The raw, unstructured complaint text from the citizen.
-    image_base64   : Optional base64-encoded image (PNG/JPEG) accompanying
-                     the complaint. Passed verbatim to the LLM vision call.
     """
 
     complaint_id: UUID = Field(
@@ -66,14 +64,6 @@ class AnalyzeRequest(BaseModel):
         description="Raw complaint text from the citizen (10–4000 characters).",
         examples=["The manhole cover on MG Road near bus stop 14 is missing. "
                   "Two bikes nearly fell in last night. Very dangerous!"],
-    )
-    image_base64: str | None = Field(
-        default=None,
-        description=(
-            "Optional base64-encoded image (JPEG/PNG). "
-            "When provided, the LLM performs multimodal analysis. "
-            "Do NOT include the data-URI prefix (strip 'data:image/jpeg;base64,')."
-        ),
     )
 
     @field_validator("text_description")
@@ -125,7 +115,7 @@ class PrimaryIssue(BaseModel):
 
 class SecondaryIssue(BaseModel):
     """
-    Any additional, co-occurring concern found in the complaint text/image.
+    Any additional, co-occurring concern found in the complaint text.
 
     category        : One of the 10 canonical IssueCategory values.
     risk_description: Short explanation of the secondary risk.

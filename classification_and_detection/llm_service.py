@@ -63,7 +63,7 @@ SYSTEM_PROMPT: str = textwrap.dedent(f"""
 You are ResolveX-AI, an expert urban-governance complaint classifier for a
 Smart Public Service CRM used by municipal authorities.
  
-Your task: analyse a citizen's complaint (text, and optionally an image) and
+Your task: analyse a citizen's complaint (text) and
 return a SINGLE valid JSON object — no prose, no markdown, no code fences.
  
 ALLOWED CATEGORIES  (you MUST use one of these EXACT strings only)
@@ -106,36 +106,18 @@ RULES
 # ── Helper: build user message content ────────────────────────────────────────
  
 def _build_user_content(request: AnalyzeRequest) -> list[dict[str, Any]]:
-    text_part: dict[str, Any] = {
+    return [{
         "type": "text",
         "text": (
             f"Complaint text:\n\"\"\"\n{request.text_description}\n\"\"\"\n\n"
             "Analyse the above complaint and return the JSON object as instructed. "
             "Output ONLY the JSON object, nothing else."
         ),
-    }
- 
-    if request.image_base64 is None:
-        return [text_part]
- 
-    image_part: dict[str, Any] = {
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:image/jpeg;base64,{request.image_base64}",
-        },
-    }
-    return [text_part, image_part]
+    }]
 
 
 def _select_model(request: AnalyzeRequest) -> str:
-    """
-    Select the configured NIM model based on request modality.
-
-    NVIDIA's OpenAI-compatible API expects a vision-capable model for requests
-    that include image content.
-    """
-    if request.image_base64:
-        return settings.nim_vision_model
+    """Select the configured NIM model."""
     return settings.nim_model
  
  
