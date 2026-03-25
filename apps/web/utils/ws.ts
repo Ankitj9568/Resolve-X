@@ -1,5 +1,3 @@
-
-
 import { useAuthStore } from '../store/auth';
 import type { WebSocketEvent } from './types';
 
@@ -28,7 +26,7 @@ export function connectWebSocket(): void {
   }
 
   intentionalClose = false;
-  socket = new WebSocket(`${WS_URL}/ws?token=${encodeURIComponent(token)}`);
+  socket = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
 
   socket.onopen = () => {
     console.log('WS connected');

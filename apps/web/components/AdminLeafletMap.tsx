@@ -1,7 +1,5 @@
 'use client';
 // apps/web/components/AdminLeafletMap.tsx
-// The actual Leaflet map implementation — imported dynamically (ssr:false).
-// Separated from the page so dynamic import wraps the entire Leaflet context.
 
 import { useEffect } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Polygon, Popup, useMap } from 'react-leaflet';
@@ -19,18 +17,23 @@ interface WardFeatureProperties {
   name?: string;
 }
 
-// Category colour map for markers
+interface ClusterProperties {
+  cluster_id:       number;
+  complaint_count:  number;
+  primary_category: string;
+}
+
 const CATEGORY_COLORS: Record<string, string> = {
-  'CAT-01': '#6366f1', // indigo - roads
-  'CAT-02': '#3b82f6', // blue - drainage
-  'CAT-03': '#f59e0b', // amber - streetlight
-  'CAT-04': '#10b981', // green - waste
-  'CAT-05': '#06b6d4', // cyan - water
-  'CAT-06': '#84cc16', // lime - parks
-  'CAT-07': '#f97316', // orange - encroachment
-  'CAT-08': '#8b5cf6', // violet - noise
-  'CAT-09': '#ec4899', // pink - stray animals
-  'CAT-10': '#9ca3af', // gray - other
+  'CAT-01': '#6366f1',
+  'CAT-02': '#3b82f6',
+  'CAT-03': '#f59e0b',
+  'CAT-04': '#10b981',
+  'CAT-05': '#06b6d4',
+  'CAT-06': '#84cc16',
+  'CAT-07': '#f97316',
+  'CAT-08': '#8b5cf6',
+  'CAT-09': '#ec4899',
+  'CAT-10': '#9ca3af',
 };
 
 const RISK_COLORS = {
@@ -48,9 +51,8 @@ function toLatLng(point: number[]): [number, number] | null {
 
 function markerOptions(marker: MapMarker) {
   const color = CATEGORY_COLORS[marker.category] ?? '#9ca3af';
-  const isHollow = marker.marker_type === 'hollow';
+  const isHollow   = marker.marker_type === 'hollow';
   const isResolved = marker.status === 'resolved';
-
   return {
     radius:      isResolved ? 7 : 8,
     color:       isResolved ? '#22c55e' : color,
@@ -61,8 +63,7 @@ function markerOptions(marker: MapMarker) {
   };
 }
 
-// Adds persistent legend control to the map
-function MapLegend() {
+function MapLegend({ hasClusters }: { hasClusters: boolean }) {
   const map = useMap();
   useEffect(() => {
     const legend = new (L.Control.extend({
@@ -79,6 +80,7 @@ function MapLegend() {
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2px dashed #6366f1;margin-right:6px"></span>Pending verification<br>
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;margin-right:6px"></span>Resolved<br>
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:6px"></span>Risk cluster<br>
+          ${hasClusters ? `<span style="display:inline-block;width:10px;height:10px;background:rgba(239,68,68,0.25);border:1.5px solid #ef4444;margin-right:6px"></span>Incident cluster<br>` : ''}
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#9ca3af;margin-right:6px"></span>Unclassified
         `;
         return div;
@@ -86,7 +88,7 @@ function MapLegend() {
     }))({ position: 'bottomright' });
     legend.addTo(map);
     return () => { legend.remove(); };
-  }, [map]);
+  }, [map, hasClusters]);
   return null;
 }
 
@@ -94,9 +96,12 @@ interface Props {
   markers:  MapMarker[];
   wards:    GeoJsonFeatureCollection<WardFeatureProperties> | null;
   riskData: GeoJsonFeatureCollection<RiskFeatureProperties> | null;
+  clusters: GeoJsonFeatureCollection<ClusterProperties> | null;
 }
 
-export default function AdminLeafletMap({ markers, wards, riskData }: Props) {
+export default function AdminLeafletMap({ markers, wards, riskData, clusters }: Props) {
+  const hasClusters = (clusters?.features?.length ?? 0) > 0;
+
   return (
     <MapContainer
       center={[28.6100, 77.2090]}
@@ -133,6 +138,89 @@ export default function AdminLeafletMap({ markers, wards, riskData }: Props) {
             </Popup>
           </Polygon>
         );
+      })}
+
+      {/* ── Integration 4: DBSCAN cluster polygons ─────────────────────────
+          Renders each cluster as a translucent red polygon.
+          The DBSCAN service returns either Polygon or MultiPoint geometry.
+          We handle both — MultiPoint falls back to individual circle markers. */}
+      {clusters?.features?.map((feature) => {
+        const props = feature.properties;
+        const geom  = feature.geometry;
+
+        if (!geom || !geom.type) return null;
+
+        if (geom.type === 'Polygon') {
+          // Defensive: check coordinates structure
+          let coords: [number, number][] = [];
+          if (Array.isArray(geom.coordinates) && Array.isArray(geom.coordinates[0])) {
+            // Only use the first ring (outer boundary)
+            const ring = geom.coordinates[0];
+            if (Array.isArray(ring)) {
+              coords = ring
+                .filter((pt): pt is number[] => Array.isArray(pt) && pt.length === 2 && pt.every(n => typeof n === 'number'))
+                .map((pt) => toLatLng(pt))
+                .filter((p): p is [number, number] => p !== null);
+            }
+          }
+          if (!coords || coords.length < 3) return null;
+
+          return (
+            <Polygon
+              key={`cluster-${props.cluster_id}`}
+              positions={coords}
+              pathOptions={{
+                color:       '#ef4444',
+                fillColor:   '#ef4444',
+                fillOpacity: 0.18,
+                weight:      2,
+                dashArray:   '6 3',
+              }}
+            >
+              <Popup>
+                <div style={{ fontSize: 13, lineHeight: 1.6, minWidth: 140 }}>
+                  <strong>Incident Cluster #{props.cluster_id}</strong><br />
+                  Complaints: {props.complaint_count}<br />
+                  Primary: {props.primary_category}
+                </div>
+              </Popup>
+            </Polygon>
+          );
+        }
+
+        if (geom.type === 'MultiPoint') {
+          // Defensive: check coordinates is array of points
+          if (!Array.isArray(geom.coordinates)) return null;
+          return geom.coordinates.map((point, i) => {
+            // Each point should be a number[]
+            const latlng = Array.isArray(point) ? toLatLng(point as unknown as [number, number]) : null;
+            if (!latlng) return null;
+            return (
+              <CircleMarker
+                key={`cluster-${props.cluster_id}-pt-${i}`}
+                center={latlng}
+                radius={10}
+                pathOptions={{
+                  color:       '#ef4444',
+                  fillColor:   '#ef4444',
+                  fillOpacity: 0.18,
+                  weight:      2,
+                  dashArray:   '4 3',
+                }}
+              >
+                <Popup>
+                  <div style={{ fontSize: 13, lineHeight: 1.6, minWidth: 140 }}>
+                    <strong>Cluster #{props.cluster_id}</strong><br />
+                    Complaints: {props.complaint_count}<br />
+                    Primary: {props.primary_category}
+                  </div>
+                </Popup>
+              </CircleMarker>
+            );
+          });
+        }
+
+        return null;
       })}
 
       {/* Ward boundary outlines */}
@@ -173,7 +261,7 @@ export default function AdminLeafletMap({ markers, wards, riskData }: Props) {
         </CircleMarker>
       ))}
 
-      <MapLegend />
+      <MapLegend hasClusters={hasClusters} />
     </MapContainer>
   );
 }

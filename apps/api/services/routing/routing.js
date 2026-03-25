@@ -1,11 +1,12 @@
-
 const express       = require('express');
 const router        = express.Router();
+const axios         = require('axios');
 const pool          = require('../db/db');
 const cron          = require('node-cron');
 const { getConnection, publish, createConsumer, QUEUES } = require('../../rabbitmq');
 const { broadcast } = require('../notifications/notifications');
-const { classify }  = require('../classifier/classifier');
+
+const CLASSIFIER_URL = process.env.CLASSIFIER_URL || 'http://classifier:8000';
 
 // ── SLA tier map (seconds) ────────────────────────────────────────────────────
 
@@ -16,28 +17,56 @@ function slaDeadline(priority) {
   return new Date(Date.now() + seconds * 1000);
 }
 
+// ── Integration 1: Call classifier:8000 instead of local classify() ──────────
+// Sends complaint text + location to the ML service.
+// Returns { category, priority } — falls back to passed-in category + priority 3
+// if the classifier is unavailable so routing never blocks.
+
+async function classifyViaML({ description, category, latitude, longitude }) {
+  try {
+    const { data } = await axios.post(
+      `${CLASSIFIER_URL}/api/v1/analyze`,
+      {
+        text_description:       description || '',
+        latitude:               latitude   || 0,
+        longitude:              longitude  || 0,
+        user_selected_category: category,
+      },
+      { timeout: 8000 }
+    );
+
+    const analysis = data?.analysis;
+    if (!analysis) return { category, priority: 3 };
+
+    return {
+      category: analysis.primary_issue?.category  || category,
+      priority: analysis.primary_issue?.priority_score || 3,
+    };
+  } catch (err) {
+    console.error('Classifier unavailable, using defaults:', err.message);
+    return { category, priority: 3 };
+  }
+}
+
 // ── Routing engine ────────────────────────────────────────────────────────────
-// Consumes complaint.classified events from RabbitMQ.
-// For each event:
-//   1. Look up dept_id from category → departments table
-//   2. Find the least-loaded officer in that dept (fewest open tasks)
-//   3. Insert a Task record with SLA deadline
-//   4. Update complaint with dept_id and assigned_to
-//   5. Publish task.created so notification service alerts the officer
 
 async function startRoutingEngine() {
   await createConsumer(QUEUES.CLASSIFIED, async (event) => {
-    const { complaint_id, category, description } = event;
-    const classified = classify(description || '', category);
-    const priority   = classified.priority;
+    const { complaint_id, category, description, location } = event;
+    const latitude  = location?.latitude  || 0;
+    const longitude = location?.longitude || 0;
 
-    // ── Step 1: Look up department by category code ───────────────────────
+    // ── Step 1: ML classification (Integration 1) ─────────────────────────
+    const { category: mlCategory, priority } = await classifyViaML({
+      description, category, latitude, longitude,
+    });
+
+    // ── Step 2: Look up department by ML-returned category ────────────────
     const { rows: deptRows } = await pool.query(
       'SELECT id FROM departments WHERE code = $1 LIMIT 1',
-      [category]
+      [mlCategory]
     );
 
-    // CAT-10 (Other) and unmatched categories fall back to General dept
     let deptId;
     if (deptRows.length) {
       deptId = deptRows[0].id;
@@ -49,13 +78,11 @@ async function startRoutingEngine() {
     }
 
     if (!deptId) {
-      console.error(`No department found for category ${category}, complaint ${complaint_id}`);
-      return; // consumer will ack — don't requeue indefinitely for missing dept
+      console.error(`No department found for category ${mlCategory}, complaint ${complaint_id}`);
+      return;
     }
 
-    // ── Step 2: Find least-loaded officer in dept ─────────────────────────
-    // Least-loaded = officer with the fewest open (non-resolved) tasks.
-    // LEFT JOIN ensures officers with zero tasks are included.
+    // ── Step 3: Find least-loaded officer ────────────────────────────────
     const { rows: officerRows } = await pool.query(
       `SELECT u.id, COUNT(t.id) AS open_tasks
        FROM users u
@@ -74,7 +101,7 @@ async function startRoutingEngine() {
     const assignedTo = officerRows[0]?.id || null;
     const deadline   = slaDeadline(priority);
 
-    // ── Step 3: Insert primary Task record ────────────────────────────────
+    // ── Step 4: Insert Task ───────────────────────────────────────────────
     const { rows: [task] } = await pool.query(
       `INSERT INTO tasks
          (id, complaint_id, dept_id, assigned_to, is_primary,
@@ -86,25 +113,25 @@ async function startRoutingEngine() {
       [complaint_id, deptId, assignedTo, deadline]
     );
 
-    // ── Step 4: Update complaint with dept + officer assignment ───────────
+    // ── Step 5: Update complaint ──────────────────────────────────────────
     await pool.query(
       `UPDATE complaints
        SET dept_id = $1, assigned_to = $2, status = 'assigned',
-           sla_deadline = $3, updated_at = now()
-       WHERE id = $4`,
-      [deptId, assignedTo, deadline, complaint_id]
+           sla_deadline = $3, priority = $4, updated_at = now()
+       WHERE id = $5`,
+      [deptId, assignedTo, deadline, priority, complaint_id]
     );
 
-    // ── Step 5: Audit trail ───────────────────────────────────────────────
+    // ── Step 6: Audit trail ───────────────────────────────────────────────
     await pool.query(
       `INSERT INTO complaint_history
          (id, complaint_id, actor_id, action, old_status, new_status, note, created_at)
        VALUES
          (gen_random_uuid(), $1, $2, 'assigned', 'pending', 'assigned', $3, now())`,
-      [complaint_id, assignedTo, `Routed to dept ${deptId}`]
+      [complaint_id, assignedTo, `ML routed to dept ${deptId} (category: ${mlCategory}, priority: ${priority})`]
     );
 
-    // ── Step 6: Publish task.created → notification service ───────────────
+    // ── Step 7: Publish task.created ──────────────────────────────────────
     await publish(QUEUES.TASK_CREATED, {
       task_id:      task.id,
       complaint_id,
@@ -113,7 +140,7 @@ async function startRoutingEngine() {
       sla_deadline: deadline,
     });
 
-    // ── Step 7: WebSocket broadcast for live dashboard update ─────────────
+    // ── Step 8: WebSocket broadcast ───────────────────────────────────────
     broadcast({
       type:         'complaint.status_updated',
       complaint_id,
@@ -121,26 +148,16 @@ async function startRoutingEngine() {
       dept_id:      deptId,
     });
 
-    console.log(`Routed complaint ${complaint_id} → dept ${deptId}, officer ${assignedTo}`);
+    console.log(`Routed complaint ${complaint_id} → dept ${deptId} (ML category: ${mlCategory}, priority: ${priority}), officer ${assignedTo}`);
   });
 
   console.log('Routing engine started');
 }
 
 // ── SLA escalation cron ───────────────────────────────────────────────────────
-// Runs every 15 minutes.
-// Two separate passes:
-//   Pass A — tasks at >= 80% SLA consumed: publish warning event
-//   Pass B — tasks at >= 100% SLA consumed: set status = escalated
-//
-// FIX: original used "sla_deadline < now() * 0.8" which is invalid SQL.
-// Correct approach: compute what time 80% of the SLA window elapsed, i.e.
-//   created_at + (sla_deadline - created_at) * 0.8
-// Any task where now() is past that point has consumed 80%+ of its SLA.
 
 cron.schedule('*/15 * * * *', async () => {
   try {
-    // ── Pass A: 80% SLA consumed → escalation warning ────────────────────
     const { rows: warningTasks } = await pool.query(
       `SELECT t.id, t.dept_id, t.assigned_to, t.complaint_id
        FROM tasks t
@@ -150,7 +167,6 @@ cron.schedule('*/15 * * * *', async () => {
     );
 
     await Promise.all(warningTasks.map(async (task) => {
-      // Publish to queue so notification service dispatches to officer + dept_head
       await publish(QUEUES.SLA_ESCALATION, {
         type:         'sla.escalation',
         task_id:      task.id,
@@ -160,21 +176,18 @@ cron.schedule('*/15 * * * *', async () => {
         pct_consumed: 80,
       });
 
-      // WebSocket push for immediate dashboard badge update
       broadcast({
         type:    'sla.escalation',
         task_id: task.id,
         dept_id: task.dept_id,
       });
 
-      // Mark notified so we don't re-send on the next cron tick
       await pool.query(
         'UPDATE tasks SET escalation_notified = true WHERE id = $1',
         [task.id]
       );
     }));
 
-    // ── Pass B: 100% SLA consumed → auto-escalate status ─────────────────
     const { rows: overdueTasks } = await pool.query(
       `UPDATE tasks
        SET status = 'escalated', updated_at = now()
@@ -184,14 +197,12 @@ cron.schedule('*/15 * * * *', async () => {
     );
 
     await Promise.all(overdueTasks.map(async (task) => {
-      // Update parent complaint status to match
       await pool.query(
         `UPDATE complaints SET status = 'escalated', updated_at = now()
          WHERE id = $1`,
         [task.complaint_id]
       );
 
-      // Audit trail
       await pool.query(
         `INSERT INTO complaint_history
            (id, complaint_id, actor_id, action, old_status, new_status, note, created_at)
@@ -218,17 +229,11 @@ cron.schedule('*/15 * * * *', async () => {
   }
 });
 
-// ── Start routing engine on module load ───────────────────────────────────────
-// Wrapped in an IIFE so top-level await is not needed (Node < 14.8 compat).
-
 (async () => {
   try {
     await startRoutingEngine();
   } catch (err) {
     console.error('Failed to start routing engine:', err.message);
-    // Do not crash the process — RabbitMQ may not be ready yet.
-    // The fixed rabbitmq.js connect() will retry; restart routing engine
-    // by listening to the reconnect event if needed.
   }
 })();
 

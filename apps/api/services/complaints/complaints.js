@@ -1,69 +1,26 @@
- 
 const express  = require('express');
 const router   = express.Router();
+const axios    = require('axios');
 const { requireRole } = require('../auth/auth');
 const pool     = require('../db/db');
 const { broadcast }  = require('../notifications/notifications');
 const amqplib  = require('amqplib');
- 
+
 // ── Constants ────────────────────────────────────────────────────────────────
- 
+
 const DEMO_MODE = process.env.DEMO_MODE === 'true';
- 
+const CLASSIFIER_URL = process.env.CLASSIFIER_URL || 'http://classifier:8000';
+
 const DEMO_BBOX = {
   lat_min: 28.595, lat_max: 28.625,
   lng_min: 77.195, lng_max: 77.225,
 };
- 
-// SLA deadlines in seconds per priority level
+
 const SLA_SECONDS = { 1: 86400, 2: 172800, 3: 259200, 4: 432000, 5: 864000 };
- 
 const VALID_STATUSES = ['pending', 'assigned', 'in_progress', 'escalated', 'resolved', 'closed'];
- 
-// Full multi-issue detection lookup table (all 10 categories)
-const DETECTION_TABLE = {
-  'CAT-01': [
-    { category: 'CAT-04', label: 'waste_accumulation',       confidence: 0.71, dept: 'SANITATION' },
-    { category: 'CAT-02', label: 'waterlogging_risk',         confidence: 0.58, dept: 'DRAINAGE'   },
-  ],
-  'CAT-02': [
-    { category: 'CAT-02', label: 'flooding_risk',             confidence: 0.74, dept: 'DRAINAGE'   },
-    { category: 'CAT-04', label: 'foul_odour_sanitation',     confidence: 0.63, dept: 'SANITATION' },
-  ],
-  'CAT-03': [
-    { category: 'CAT-03', label: 'safety_crime_risk',         confidence: 0.69, dept: 'ELECTRICAL' },
-    { category: 'CAT-03', label: 'electrical_infra_age',      confidence: 0.52, dept: 'ELECTRICAL' },
-  ],
-  'CAT-04': [
-    { category: 'CAT-04', label: 'health_hazard',             confidence: 0.81, dept: 'SANITATION' },
-    { category: 'CAT-05', label: 'groundwater_contamination', confidence: 0.55, dept: 'WATER'      },
-  ],
-  'CAT-05': [
-    { category: 'CAT-05', label: 'pipeline_burst_prediction', confidence: 0.77, dept: 'WATER'      },
-    { category: 'CAT-01', label: 'road_damage_risk',          confidence: 0.49, dept: 'ROADS'      },
-  ],
-  'CAT-06': [
-    { category: 'CAT-06', label: 'accessibility_barrier',     confidence: 0.72, dept: 'PARKS'      },
-    { category: 'CAT-02', label: 'rainwater_pooling',         confidence: 0.61, dept: 'DRAINAGE'   },
-  ],
-  'CAT-07': [
-    { category: 'CAT-07', label: 'traffic_disruption',        confidence: 0.66, dept: 'ROADS'      },
-    { category: 'CAT-07', label: 'pedestrian_safety',         confidence: 0.58, dept: 'ROADS'      },
-  ],
-  'CAT-08': [
-    { category: 'CAT-08', label: 'public_health_hazard',      confidence: 0.60, dept: 'SANITATION' },
-    { category: 'CAT-08', label: 'regulatory_violation',      confidence: 0.55, dept: 'GENERAL'    },
-  ],
-  'CAT-09': [
-    { category: 'CAT-09', label: 'public_safety_risk',        confidence: 0.73, dept: 'GENERAL'    },
-    { category: 'CAT-09', label: 'road_accident_potential',   confidence: 0.61, dept: 'ROADS'      },
-  ],
-  'CAT-10': [], // catch-all — no secondary detection
-};
- 
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
- 
-// Derive ward_id from complaint coordinates using PostGIS
+
 async function resolveWardId(lng, lat) {
   const { rows } = await pool.query(
     `SELECT id FROM wards
@@ -76,14 +33,12 @@ async function resolveWardId(lng, lat) {
   );
   return rows[0]?.id || null;
 }
- 
-// Compute SLA deadline timestamp from priority
+
 function computeSLADeadline(priority) {
   const seconds = SLA_SECONDS[priority] || SLA_SECONDS[3];
   return new Date(Date.now() + seconds * 1000);
 }
- 
-// Publish complaint.submitted event to RabbitMQ
+
 async function publishToQueue(payload) {
   try {
     const conn    = await amqplib.connect(process.env.RABBITMQ_URL);
@@ -97,15 +52,13 @@ async function publishToQueue(payload) {
     await channel.close();
     await conn.close();
   } catch (err) {
-    // Queue failure must never block the HTTP response
     console.error('RabbitMQ publish error', err.message);
   }
 }
- 
-// Create secondary Task records for detected issues
+
 async function createSecondaryTasks(complaintId, secondaryIssues, slaPriority) {
-  if (!secondaryIssues.length) return;
-  const deadline = computeSLADeadline(slaPriority + 1); // secondary = lower priority
+  if (!secondaryIssues || !secondaryIssues.length) return;
+  const deadline = computeSLADeadline(slaPriority + 1);
   for (const issue of secondaryIssues) {
     await pool.query(
       `INSERT INTO tasks
@@ -116,18 +69,54 @@ async function createSecondaryTasks(complaintId, secondaryIssues, slaPriority) {
     );
   }
 }
- 
+
+// ── Integration 2: Call classifier:8000 and extract secondary_issues ─────────
+// Returns { priority, secondaryIssues } from the ML classifier.
+// Falls back gracefully if the classifier is unavailable.
+
+async function classifyComplaint({ description, latitude, longitude, category }) {
+  try {
+    const { data } = await axios.post(
+      `${CLASSIFIER_URL}/api/v1/analyze`,
+      {
+        text_description:      description || '',
+        latitude:              latitude,
+        longitude:             longitude,
+        user_selected_category: category,
+      },
+      { timeout: 8000 }
+    );
+
+    // data.analysis is null when classifier returns a duplicate short-circuit
+    const analysis = data?.analysis;
+    if (!analysis) return { priority: 3, secondaryIssues: [] };
+
+    const priority        = analysis.primary_issue?.priority_score ?? 3;
+    const secondaryIssues = (analysis.secondary_issues ?? []).map(issue => ({
+      category:   issue.category,
+      confidence: issue.confidence,
+      label:      issue.risk_description,
+    }));
+
+    return { priority, secondaryIssues };
+  } catch (err) {
+    // Non-fatal — classifier down should not block complaint submission
+    console.error('Classifier call failed, using defaults:', err.message);
+    return { priority: 3, secondaryIssues: [] };
+  }
+}
+
 // ── POST /complaints ──────────────────────────────────────────────────────────
- 
+
 router.post('/', requireRole('citizen'), async (req, res) => {
   const { category, subcategory, description, longitude, latitude } = req.body;
   const citizenId = req.user.sub;
   const source    = req.user.source || 'production';
- 
+
   if (!category || longitude == null || latitude == null) {
     return res.status(400).json({ error: 'category, longitude and latitude are required' });
   }
- 
+
   try {
     // ── Step 1: City boundary geo-validation ──────────────────────────────
     const { rows: [geoRow] } = await pool.query(
@@ -138,7 +127,6 @@ router.post('/', requireRole('citizen'), async (req, res) => {
        FROM wards WHERE id = 'CITY_BOUNDARY' LIMIT 1`,
       [longitude, latitude]
     );
-    // Fallback: if no CITY_BOUNDARY row exists, use bbox check
     const withinCity = geoRow?.valid ?? (
       latitude  >= 28.4 && latitude  <= 28.9 &&
       longitude >= 76.8 && longitude <= 77.5
@@ -146,8 +134,8 @@ router.post('/', requireRole('citizen'), async (req, res) => {
     if (!withinCity) {
       return res.status(400).json({ error: 'Location outside service area' });
     }
- 
-    // ── Step 2: Demo geo-fence (DEMO_MODE only) ───────────────────────────
+
+    // ── Step 2: Demo geo-fence ────────────────────────────────────────────
     if (DEMO_MODE) {
       const inFence = (
         latitude  >= DEMO_BBOX.lat_min && latitude  <= DEMO_BBOX.lat_max &&
@@ -157,12 +145,11 @@ router.post('/', requireRole('citizen'), async (req, res) => {
         return res.status(400).json({ error: 'Location must be within demo ward' });
       }
     }
- 
+
     // ── Step 3: Ward assignment via PostGIS ───────────────────────────────
     const wardId = await resolveWardId(longitude, latitude);
- 
-    // ── Step 4: Duplicate check (50m radius, 48h, same category, not closed)
-    // Cast to ::geography so ST_DWithin measures in metres, not degrees
+
+    // ── Step 4: Duplicate check ───────────────────────────────────────────
     const { rows: dedupRows } = await pool.query(
       `SELECT id FROM complaints
        WHERE category = $1
@@ -182,11 +169,16 @@ router.post('/', requireRole('citizen'), async (req, res) => {
         existing_complaint_id: dedupRows[0].id,
       });
     }
- 
-    // ── Step 5: Compute priority + SLA ───────────────────────────────────
-    const priority    = 3; // default; classification engine will override via queue
+
+    // ── Step 5: ML Classification (Integration 2) ─────────────────────────
+    // Call classifier:8000 to get AI-derived priority + secondary issues.
+    // Falls back to priority=3, secondaryIssues=[] if classifier is down.
+    const { priority, secondaryIssues } = await classifyComplaint({
+      description, latitude, longitude, category,
+    });
+
     const slaDeadline = computeSLADeadline(priority);
- 
+
     // ── Step 6: Insert complaint ──────────────────────────────────────────
     const { rows: [complaint] } = await pool.query(
       `INSERT INTO complaints
@@ -207,12 +199,12 @@ router.post('/', requireRole('citizen'), async (req, res) => {
         slaDeadline,
       ]
     );
- 
-    // ── Step 7: Multi-issue detection ─────────────────────────────────────
-    const secondaryIssues = DETECTION_TABLE[category] || [];
+
+    // ── Step 7: Multi-issue detection (Integration 2 continued) ──────────
+    // Use ML-returned secondary_issues (not the static lookup table).
     await createSecondaryTasks(complaint.id, secondaryIssues, priority);
- 
-    // ── Step 8: Insert primary audit log entry ────────────────────────────
+
+    // ── Step 8: Audit log ─────────────────────────────────────────────────
     await pool.query(
       `INSERT INTO complaint_history
          (id, complaint_id, actor_id, action, new_status, created_at)
@@ -220,8 +212,8 @@ router.post('/', requireRole('citizen'), async (req, res) => {
          (gen_random_uuid(), $1, $2, 'submitted', 'pending', now())`,
       [complaint.id, citizenId]
     );
- 
-    // ── Step 9: Publish to RabbitMQ (non-blocking) ────────────────────────
+
+    // ── Step 9: Publish to RabbitMQ ───────────────────────────────────────
     publishToQueue({
       complaint_id: complaint.id,
       category,
@@ -231,45 +223,44 @@ router.post('/', requireRole('citizen'), async (req, res) => {
       ward_id:     wardId,
       source,
     });
- 
+
     // ── Step 10: Respond ──────────────────────────────────────────────────
     return res.status(201).json({
-      complaint_id:    complaint.id,
-      sla_deadline:    complaint.sla_deadline,
+      complaint_id:     complaint.id,
+      sla_deadline:     complaint.sla_deadline,
       secondary_issues: secondaryIssues,
     });
- 
+
   } catch (err) {
     console.error('Complaint submit error', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
- 
+
 // ── GET /complaints/:id ───────────────────────────────────────────────────────
- 
+
 router.get('/:id',
   requireRole('citizen', 'officer', 'dept_head', 'commissioner'),
   async (req, res) => {
     try {
       let query  = 'SELECT * FROM complaints WHERE id = $1';
       const params = [req.params.id];
- 
-      // Citizens can only see their own complaints
+
       if (req.user.role === 'citizen') {
         query += ' AND citizen_id = $2';
         params.push(req.user.sub);
       }
- 
+
       const { rows } = await pool.query(query, params);
       if (!rows.length) return res.status(404).json({ error: 'Not found' });
- 
+
       const { rows: history } = await pool.query(
         `SELECT * FROM complaint_history
          WHERE complaint_id = $1
          ORDER BY created_at ASC`,
         [req.params.id]
       );
- 
+
       return res.json({ ...rows[0], history });
     } catch (err) {
       console.error('GET complaint error', err);
@@ -277,33 +268,34 @@ router.get('/:id',
     }
   }
 );
- 
+
 // ── GET /complaints ───────────────────────────────────────────────────────────
- 
+
 router.get('/',
-  requireRole('officer', 'dept_head', 'commissioner'),
+  requireRole('citizen', 'officer', 'dept_head', 'commissioner'),
   async (req, res) => {
     try {
       const { status, page = 1, limit = 50 } = req.query;
       const offset = (page - 1) * limit;
       const params = [];
       const conditions = [];
- 
-      // RBAC scoping — officers only see their dept's complaints
-      if (req.user.role === 'officer' || req.user.role === 'dept_head') {
+
+      if (req.user.role === 'citizen') {
+        conditions.push(`citizen_id = $${params.length + 1}`);
+        params.push(req.user.sub);
+      } else if (req.user.role === 'officer' || req.user.role === 'dept_head') {
         conditions.push(`dept_id = $${params.length + 1}`);
         params.push(req.user.dept_id);
       }
-      // commissioner: no filter
- 
+
       if (status) {
         conditions.push(`status = $${params.length + 1}`);
         params.push(status);
       }
- 
+
       const where  = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
       params.push(limit, offset);
- 
+
       const { rows } = await pool.query(
         `SELECT * FROM complaints
          ${where}
@@ -311,7 +303,7 @@ router.get('/',
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
       );
- 
+
       return res.json({ complaints: rows, page: Number(page), limit: Number(limit) });
     } catch (err) {
       console.error('List complaints error', err);
@@ -319,35 +311,32 @@ router.get('/',
     }
   }
 );
- 
+
 // ── PATCH /complaints/:id/status ──────────────────────────────────────────────
- 
+
 router.patch('/:id/status',
   requireRole('officer', 'dept_head', 'commissioner'),
   async (req, res) => {
     const { status, note } = req.body;
- 
+
     if (!status || !VALID_STATUSES.includes(status)) {
       return res.status(400).json({
         error: `status must be one of: ${VALID_STATUSES.join(', ')}`,
       });
     }
- 
+
     try {
-      // Fetch current status for audit trail
       const { rows: [current] } = await pool.query(
         'SELECT status FROM complaints WHERE id = $1',
         [req.params.id]
       );
       if (!current) return res.status(404).json({ error: 'Not found' });
- 
-      // Update complaint status
+
       await pool.query(
         'UPDATE complaints SET status = $1, updated_at = now() WHERE id = $2',
         [status, req.params.id]
       );
- 
-      // Audit trail — always write history on status change
+
       await pool.query(
         `INSERT INTO complaint_history
            (id, complaint_id, actor_id, action, old_status, new_status, note, created_at)
@@ -355,14 +344,13 @@ router.patch('/:id/status',
            (gen_random_uuid(), $1, $2, 'status_updated', $3, $4, $5, now())`,
         [req.params.id, req.user.sub, current.status, status, note || null]
       );
- 
-      // Broadcast WebSocket event for real-time dashboard + citizen tracking update
+
       broadcast({
         type:         'complaint.status_updated',
         complaint_id: req.params.id,
         new_status:   status,
       });
- 
+
       return res.json({ success: true });
     } catch (err) {
       console.error('Status update error', err);
@@ -370,9 +358,9 @@ router.patch('/:id/status',
     }
   }
 );
- 
+
 // ── GET /complaints/:id/history ───────────────────────────────────────────────
- 
+
 router.get('/:id/history',
   requireRole('officer', 'dept_head', 'commissioner'),
   async (req, res) => {
@@ -390,9 +378,9 @@ router.get('/:id/history',
     }
   }
 );
- 
+
 // ── POST /complaints/:id/verify ───────────────────────────────────────────────
- 
+
 router.post('/:id/verify',
   requireRole('officer', 'dept_head', 'commissioner'),
   async (req, res) => {
@@ -405,14 +393,12 @@ router.post('/:id/verify',
       if (current.officer_verified) {
         return res.status(200).json({ verified: true, message: 'Already verified' });
       }
- 
-      // Set officer_verified = true
+
       await pool.query(
         'UPDATE complaints SET officer_verified = true, updated_at = now() WHERE id = $1',
         [req.params.id]
       );
- 
-      // Audit trail
+
       await pool.query(
         `INSERT INTO complaint_history
            (id, complaint_id, actor_id, action, note, created_at)
@@ -420,13 +406,12 @@ router.post('/:id/verify',
            (gen_random_uuid(), $1, $2, 'officer_verified', 'Officer field verification', now())`,
         [req.params.id, req.user.sub]
       );
- 
-      // Broadcast WebSocket event — triggers hollow → solid marker on map
+
       broadcast({
         type:         'complaint.verified',
         complaint_id: req.params.id,
       });
- 
+
       return res.json({ verified: true });
     } catch (err) {
       console.error('Verify error', err);
@@ -434,5 +419,5 @@ router.post('/:id/verify',
     }
   }
 );
- 
+
 module.exports = router;

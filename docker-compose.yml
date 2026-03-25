@@ -134,10 +134,11 @@ services:
       NEXT_PUBLIC_API_URL:  http://localhost:4000/api/v1
       NEXT_PUBLIC_WS_URL:   ws://localhost:4000
       NEXT_PUBLIC_MODE:     demo
+    
    # volumes:
-   #   - ./apps/web:/app
-   #   - /app/node_modules
-      #- /app/.next                   # prevent .next cache conflicts
+    #  - ./apps/web:/app
+    #   - /app/node_modules
+    #  - /app/.next                   # prevent .next cache conflicts
 
   # ── AI Classification & Detection Service (Python/FastAPI) ─────────────────
   classifier:

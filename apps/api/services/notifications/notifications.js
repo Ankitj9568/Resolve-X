@@ -98,15 +98,6 @@ async function broadcast(event) {
   }
 }
 
-// ── WebSocket server setup ────────────────────────────────────────────────────
-// Called once from index.js after app.listen() returns the http.Server.
-// Attaches a ws.Server to the same port — no separate WS port needed.
-//
-// Usage in index.js:
-//   const server = app.listen(PORT, ...);
-//   const { initWS } = require('./services/notifications/notifications');
-//   initWS(server);
-
 function initWS(httpServer) {
   const wss = new WebSocket.Server({ noServer: true });
 
