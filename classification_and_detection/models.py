@@ -13,6 +13,7 @@ Design decisions:
 from __future__ import annotations
 
 from enum import Enum
+from urllib.parse import urlparse
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -50,6 +51,8 @@ class AnalyzeRequest(BaseModel):
 
     complaint_id   : Stable identifier used for idempotency and tracing.
     text_description: The raw, unstructured complaint text from the citizen.
+    image_base64   : Optional base64-encoded image for vision-based analysis.
+    image_url      : Optional image URL (preferred over base64).
     """
 
     complaint_id: UUID = Field(
@@ -65,12 +68,64 @@ class AnalyzeRequest(BaseModel):
         examples=["The manhole cover on MG Road near bus stop 14 is missing. "
                   "Two bikes nearly fell in last night. Very dangerous!"],
     )
+    image_base64: str | None = Field(
+        default=None,
+        max_length=20_000_000,  # ~15 MB limit (base64 encoded)
+        description="Optional base64 encoded image for vision-based analysis (max 15 MB).",
+    )
+    image_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Optional HTTP(S) image URL for vision-based analysis (preferred over base64).",
+    )
+    image_mime_type: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Optional MIME type hint for image_url, e.g. image/jpeg.",
+    )
 
     @field_validator("text_description")
     @classmethod
     def strip_whitespace(cls, v: str) -> str:
         """Normalise leading/trailing whitespace before LLM processing."""
         return v.strip()
+    
+    @field_validator("image_base64", mode="before")
+    @classmethod
+    def validate_image_base64(cls, v: str | None) -> str | None:
+        """Validate that image_base64, if provided, is not empty."""
+        if v is not None:
+            v = v.strip() if isinstance(v, str) else v
+            if v == "":
+                return None  # Treat empty string as no image
+        return v
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def validate_image_url(cls, v: str | None) -> str | None:
+        """Validate that image_url, if provided, is an HTTP(S) URL."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            parsed = urlparse(v)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("image_url must be a valid HTTP(S) URL")
+        return v
+
+    @field_validator("image_mime_type", mode="before")
+    @classmethod
+    def validate_image_mime_type(cls, v: str | None) -> str | None:
+        """Normalize empty MIME type hints to None."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip().lower()
+            if v == "":
+                return None
+        return v
 
 
 # ── Response Sub-schemas ───────────────────────────────────────────────────────
@@ -166,6 +221,27 @@ class AnalyzeResponse(BaseModel):
     secondary_issues: list[SecondaryIssue] = Field(
         default_factory=list,
         description="Zero or more secondary/co-occurring issues.",
+    )
+
+
+class VisionValidation(BaseModel):
+    """Gemini vision interpretation and conflict signal for complaint validation."""
+
+    enabled: bool = Field(
+        ...,
+        description="True when an image was supplied and a vision pass was attempted.",
+    )
+    summary: str | None = Field(
+        default=None,
+        description="Raw Gemini visual interpretation summary.",
+    )
+    conflict_detected: bool = Field(
+        default=False,
+        description="True when Gemini reports image/text contradiction.",
+    )
+    conflict_reason: str | None = Field(
+        default=None,
+        description="Short reason extracted from Gemini output when conflict_detected is true.",
     )
 
 

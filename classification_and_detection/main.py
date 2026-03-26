@@ -28,6 +28,7 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,7 +41,7 @@ from llm_service import (
     LLMParseError,
     LLMTimeoutError,
 )
-from models import AnalyzeResponse, ErrorDetail
+from models import AnalyzeResponse, ErrorDetail, VisionValidation
 from services import (
     close_db_pool,
     create_db_pool,
@@ -56,11 +57,54 @@ class AnalyzeV1Request(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     user_selected_category: str = Field(..., min_length=1, max_length=100)
+    image_base64: str | None = Field(default=None, max_length=20_000_000)
+    image_url: str | None = Field(default=None, max_length=2048)
+    image_mime_type: str | None = Field(default=None, max_length=100)
+    reject_on_vision_conflict: bool = Field(
+        default=False,
+        description="When true, return 422 if Gemini flags a contradiction between image and text.",
+    )
 
     @field_validator("text_description")
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
+    
+    @field_validator("image_base64", mode="before")
+    @classmethod
+    def validate_image_base64(cls, v: str | None) -> str | None:
+        """Validate that image_base64, if provided, is not empty."""
+        if v is not None:
+            v = v.strip() if isinstance(v, str) else v
+            if v == "":
+                return None
+        return v
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def validate_image_url(cls, v: str | None) -> str | None:
+        """Validate that image_url, if provided, is a valid HTTP(S) URL."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if v == "":
+                return None
+            parsed = urlparse(v)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("image_url must be a valid HTTP(S) URL")
+        return v
+
+    @field_validator("image_mime_type", mode="before")
+    @classmethod
+    def validate_image_mime_type(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip().lower()
+            if v == "":
+                return None
+        return v
 
 
 class AnalyzeAPIResponse(BaseModel):
@@ -69,6 +113,7 @@ class AnalyzeAPIResponse(BaseModel):
     is_duplicate: bool
     parent_id: str | None
     analysis: AnalyzeResponse | None
+    vision_validation: VisionValidation | None = None
 
 # ── Logging Setup ──────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -276,11 +321,35 @@ async def analyze_complaint(payload: AnalyzeV1Request) -> AnalyzeAPIResponse:
             is_duplicate=True,
             parent_id=str(parent_id),
             analysis=None,
+            vision_validation=None,
         )
 
-    result: AnalyzeResponse = await run_intelligence_pass(
+    result, vision_validation = await run_intelligence_pass(
         text_description=payload.text_description,
+        image_base64=payload.image_base64,
+        image_url=payload.image_url,
+        image_mime_type=payload.image_mime_type,
     )
+
+    if (
+        payload.reject_on_vision_conflict
+        and vision_validation is not None
+        and vision_validation.conflict_detected
+    ):
+        logger.warning(
+            "trace=%s | rejected due to vision/text conflict: %s",
+            request_trace,
+            vision_validation.conflict_reason,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={
+                "error": "VISION_TEXT_CONFLICT",
+                "message": vision_validation.conflict_reason
+                or "Uploaded image appears inconsistent with complaint text.",
+                "vision_validation": vision_validation.model_dump(),
+            },
+        )
 
     logger.info(
         "trace=%s | Returning LLM analysis → %s (priority=%d)",
@@ -292,4 +361,5 @@ async def analyze_complaint(payload: AnalyzeV1Request) -> AnalyzeAPIResponse:
         is_duplicate=False,
         parent_id=None,
         analysis=result,
+        vision_validation=vision_validation,
     )

@@ -11,6 +11,8 @@ pydantic-settings==2.7.0  # Settings management from env / .env files
 # OpenAI SDK pointed at NIM's base URL.  Swapping to Anthropic / LiteLLM later
 # only requires changing llm_service.py — nothing else touches the LLM layer.
 openai==1.59.9
+google-genai>=1.68.0
+Pillow>=10.4.0
 
 # ── HTTP / Async ───────────────────────────────────────────────────────────────
 httpx==0.28.1             # Async HTTP client (used by openai SDK internally)

@@ -56,6 +56,34 @@ class Settings(BaseSettings):
     )
 
     # ── LLM Behaviour ──────────────────────────────────────────────────────────
+    gemini_api_key: str | None = Field(
+        default=None,
+        alias="GEMINI_API_KEY",
+        description="Google Gemini API key for vision tasks.",
+    )
+    gemini_model: str = Field(
+        default="gemini-2.5-flash",
+        alias="GEMINI_MODEL",
+        description="Gemini model for vision analysis.",
+    )
+    gemini_timeout_seconds: float = Field(
+        default=45.0,
+        ge=5.0,
+        alias="GEMINI_TIMEOUT_SECONDS",
+        description="HTTP timeout for Gemini vision calls (seconds).",
+    )
+    image_download_timeout_seconds: float = Field(
+        default=20.0,
+        ge=2.0,
+        alias="IMAGE_DOWNLOAD_TIMEOUT_SECONDS",
+        description="HTTP timeout for downloading image_url payloads (seconds).",
+    )
+    image_download_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1_024,
+        alias="IMAGE_DOWNLOAD_MAX_BYTES",
+        description="Maximum size (bytes) for downloaded images.",
+    )
     llm_temperature: float = Field(
         default=0.1,
         ge=0.0,

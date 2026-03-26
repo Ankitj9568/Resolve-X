@@ -9,8 +9,8 @@ from uuid import UUID
 
 import asyncpg
 
-from llm_service import classify_complaint
-from models import AnalyzeRequest, AnalyzeResponse
+from llm_service import classify_complaint_with_validation
+from models import AnalyzeRequest, AnalyzeResponse, VisionValidation
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +101,16 @@ async def find_spatial_duplicate(
 
 async def run_intelligence_pass(
     text_description: str,
-) -> AnalyzeResponse:
+    image_base64: str | None = None,
+    image_url: str | None = None,
+    image_mime_type: str | None = None,
+) -> tuple[AnalyzeResponse, VisionValidation | None]:
     """Build normalized LLM request object and run classification."""
     request = AnalyzeRequest(
         complaint_id=uuid.uuid4(),
         text_description=text_description,
+        image_base64=image_base64,
+        image_url=image_url,
+        image_mime_type=image_mime_type,
     )
-    return await classify_complaint(request)
+    return await classify_complaint_with_validation(request)

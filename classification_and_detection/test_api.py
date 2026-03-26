@@ -20,11 +20,14 @@ import uuid
 import httpx
 
 BASE_URL = os.getenv("RESOLVEX_BASE_URL", "http://localhost:8000")
-TEST_TIMEOUT_SECONDS = float(os.getenv("RESOLVEX_TEST_TIMEOUT", "180"))
+TEST_TIMEOUT_SECONDS = float(os.getenv("RESOLVEX_TEST_TIMEOUT", "600"))
+TEST_IMAGE_URL = os.getenv("RESOLVEX_TEST_IMAGE_URL")
 
 
 async def run_tests():
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=TEST_TIMEOUT_SECONDS) as client:
+    # Use a specific timeout for the entire client to avoid ReadTimeout during long model processing
+    timeout = httpx.Timeout(TEST_TIMEOUT_SECONDS, connect=10.0)
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=timeout) as client:
 
         print(f"\nUsing test timeout: {TEST_TIMEOUT_SECONDS:.1f}s")
 
@@ -105,8 +108,51 @@ async def run_tests():
         r = await client.post("/api/v1/analyze", json=payload)
         print(f"  Expected 422, got {r.status_code}", "✓" if r.status_code == 422 else "✗")
 
+        # ── Test 5: Vision-based complaint (text + image) ──────────────────────
+        print("\n── Test 5: Vision-based complaint (text + image) ─────────────")
+        # Prefer URL-based flow to match production behavior.
+        tiny_png_b64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6W6xkAAAAASUVORK5CYII="
+
+        vision_payload = {"image_base64": tiny_png_b64}
+        if TEST_IMAGE_URL:
+            vision_payload = {"image_url": TEST_IMAGE_URL}
+
+        payload = {
+            "complaint_id": str(uuid.uuid4()),
+            "text_description": (
+                "The street light is broken and hanging by a wire. "
+                "It looks extremely dangerous and could fall on someone. "
+                "The image clearly shows the damaged bracket."
+            ),
+            **vision_payload,
+            "latitude": 12.9716,
+            "longitude": 77.5946,
+            "user_selected_category": "Streetlighting"
+        }
+        
+        print("  Sending vision-based request (this may take longer due to Gemini pass)...")
+        r = await client.post("/api/v1/analyze", json=payload)
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+        print(f"  Status: {r.status_code}")
+        data = r.json()
+        analysis = data.get("analysis")
+        vision_validation = data.get("vision_validation")
+        if analysis:
+            print(f"  Primary Category  : {analysis['primary_issue']['category']}")
+            print(f"  Priority Score    : {analysis['primary_issue']['priority_score']}/5")
+            print(f"  Confidence        : {analysis['primary_issue']['confidence']:.2f}")
+        else:
+            print("  No analysis background — possibly a duplicate.")
+
+        if vision_validation:
+            print(f"  Vision Enabled    : {vision_validation.get('enabled')}")
+            print(f"  Conflict Detected : {vision_validation.get('conflict_detected')}")
+            if vision_validation.get("conflict_reason"):
+                print(f"  Conflict Reason   : {vision_validation.get('conflict_reason')}")
+
         print("\n── All tests complete ────────────────────────────────────────\n")
 
 
 if __name__ == "__main__":
     asyncio.run(run_tests())
+
