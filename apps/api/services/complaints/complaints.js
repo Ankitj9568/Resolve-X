@@ -70,16 +70,41 @@ async function createSecondaryTasks(complaintId, secondaryIssues, slaPriority) {
   }
 }
 
+function inferMediaTypeFromUrl(url) {
+  const cleanUrl = String(url || '').toLowerCase().split('?')[0];
+  if (cleanUrl.endsWith('.mp4')) return 'video';
+  return 'image';
+}
+
+async function persistComplaintMedia(complaintId, fileUrls) {
+  if (!Array.isArray(fileUrls) || !fileUrls.length) return;
+
+  for (const url of fileUrls) {
+    const mediaType = inferMediaTypeFromUrl(url);
+    await pool.query(
+      `INSERT INTO complaint_media
+         (id, complaint_id, file_url, media_type, created_at)
+       VALUES
+         (gen_random_uuid(), $1, $2, $3, now())`,
+      [complaintId, url, mediaType]
+    );
+  }
+}
+
 // ── Integration 2: Call classifier:8000 and extract secondary_issues ─────────
 // Returns { priority, secondaryIssues } from the ML classifier.
 // Falls back gracefully if the classifier is unavailable.
 
 async function classifyComplaint({ description, latitude, longitude, category }) {
+  const safeDescription = (description || '').trim().length >= 10
+    ? description
+    : `Citizen reported ${category || 'civic issue'} at this location. Needs review.`;
+
   try {
     const { data } = await axios.post(
       `${CLASSIFIER_URL}/api/v1/analyze`,
       {
-        text_description:      description || '',
+        text_description:      safeDescription,
         latitude:              latitude,
         longitude:             longitude,
         user_selected_category: category,
@@ -214,6 +239,9 @@ router.post('/', requireRole('citizen'), async (req, res) => {
     // Use ML-returned secondary_issues (not the static lookup table).
     await createSecondaryTasks(complaint.id, secondaryIssues, priority);
 
+    // Persist pre-uploaded file URLs as complaint media rows.
+    await persistComplaintMedia(complaint.id, fileUrls);
+
     // ── Step 8: Audit log ─────────────────────────────────────────────────
     await pool.query(
       `INSERT INTO complaint_history
@@ -226,6 +254,7 @@ router.post('/', requireRole('citizen'), async (req, res) => {
     // ── Step 9: Publish to RabbitMQ ───────────────────────────────────────
     publishToQueue({
       complaint_id: complaint.id,
+      citizen_id: citizenId,
       category,
       subcategory,
       description,
@@ -301,8 +330,18 @@ router.get('/',
       }
 
       if (status) {
-        conditions.push(`status = $${params.length + 1}`);
-        params.push(status);
+        const statusValues = String(status)
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => VALID_STATUSES.includes(item));
+
+        if (statusValues.length === 1) {
+          conditions.push(`status = $${params.length + 1}`);
+          params.push(statusValues[0]);
+        } else if (statusValues.length > 1) {
+          conditions.push(`status = ANY($${params.length + 1}::text[])`);
+          params.push(statusValues);
+        }
       }
 
       const where  = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -339,7 +378,7 @@ router.patch('/:id/status',
 
     try {
       const { rows: [current] } = await pool.query(
-        'SELECT status FROM complaints WHERE id = $1',
+        'SELECT status, citizen_id FROM complaints WHERE id = $1',
         [req.params.id]
       );
       if (!current) return res.status(404).json({ error: 'Not found' });
@@ -360,6 +399,7 @@ router.patch('/:id/status',
       broadcast({
         type:         'complaint.status_updated',
         complaint_id: req.params.id,
+        citizen_id:   current.citizen_id,
         new_status:   status,
       });
 

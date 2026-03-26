@@ -11,6 +11,7 @@ const complaintsRouter                    = require('./services/complaints/compl
 const mediaRouter                         = require('./services/media/media');
 const gisRouter                           = require('./services/gis/gis');
 const routingRouter                       = require('./services/routing/routing');
+const feedbackRouter                      = require('./services/feedback/feedback');
 const { router: notifRouter, initWS }     = require('./services/notifications/notifications');
 const { connect: connectRabbitMQ }        = require('./rabbitmq');
 
@@ -56,6 +57,7 @@ app.use('/api/v1/complaints',   complaintsRouter);
 app.use('/api/v1/media',        mediaRouter);
 app.use('/api/v1/gis',          gisRouter);
 app.use('/api/v1/routing',      routingRouter);
+app.use('/api/v1/feedback',     feedbackRouter);
 app.use('/api/v1/notification', notifRouter);
 app.use('/api/v1/admin',        gisRouter);  // demo reset: DELETE /api/v1/admin/demo/reset
 

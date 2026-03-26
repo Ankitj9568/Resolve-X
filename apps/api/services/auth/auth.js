@@ -75,8 +75,24 @@ const OTP_RATE_WINDOW = 900;   // 15 minutes
 const SALT_ROUNDS     = 12;
 const IS_DEMO         = process.env.DEMO_MODE === 'true';
 
-// In non-production with mock provider, always use 123456
-const USE_MOCK_OTP = process.env.OTP_PROVIDER !== 'twilio';
+// OTP provider defaults to twilio in production to avoid accidental mock fallback.
+const OTP_PROVIDER = (
+  process.env.OTP_PROVIDER
+  || (process.env.NODE_ENV === 'production' ? 'twilio' : 'mock')
+).toLowerCase();
+
+// In mock provider, OTP is always 123456.
+const USE_MOCK_OTP = OTP_PROVIDER !== 'twilio';
+
+if (!USE_MOCK_OTP) {
+  const requiredTwilioEnv = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SID'];
+  const missingTwilioEnv = requiredTwilioEnv.filter((key) => !process.env[key]);
+  if (missingTwilioEnv.length) {
+    throw new Error(`Twilio OTP provider selected but missing env vars: ${missingTwilioEnv.join(', ')}`);
+  }
+}
+
+console.log(`[auth] OTP provider: ${USE_MOCK_OTP ? 'mock' : 'twilio'}`);
 
 // ── Phone normalisation ───────────────────────────────────────────────────────
 // Twilio requires E.164 format: +<country_code><number>

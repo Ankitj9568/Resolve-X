@@ -23,11 +23,15 @@ function slaDeadline(priority) {
 // if the classifier is unavailable so routing never blocks.
 
 async function classifyViaML({ description, category, latitude, longitude }) {
+  const safeDescription = (description || '').trim().length >= 10
+    ? description
+    : `Citizen reported ${category || 'civic issue'} at this location. Needs review.`;
+
   try {
     const { data } = await axios.post(
       `${CLASSIFIER_URL}/api/v1/analyze`,
       {
-        text_description:       description || '',
+        text_description:       safeDescription,
         latitude:               latitude   || 0,
         longitude:              longitude  || 0,
         user_selected_category: category,
@@ -51,8 +55,9 @@ async function classifyViaML({ description, category, latitude, longitude }) {
 // ── Routing engine ────────────────────────────────────────────────────────────
 
 async function startRoutingEngine() {
-  await createConsumer(QUEUES.CLASSIFIED, async (event) => {
-    const { complaint_id, category, description, location } = event;
+  // Complaints are published to complaint.submitted by complaints.js.
+  await createConsumer(QUEUES.SUBMITTED, async (event) => {
+    const { complaint_id, citizen_id, category, description, location } = event;
     const latitude  = location?.latitude  || 0;
     const longitude = location?.longitude || 0;
 
@@ -140,10 +145,19 @@ async function startRoutingEngine() {
       sla_deadline: deadline,
     });
 
+    broadcast({
+      type:         'task.assigned',
+      task_id:      task.id,
+      complaint_id,
+      officer_id:   assignedTo,
+      dept_id:      deptId,
+    });
+
     // ── Step 8: WebSocket broadcast ───────────────────────────────────────
     broadcast({
       type:         'complaint.status_updated',
       complaint_id,
+      citizen_id,
       new_status:   'assigned',
       dept_id:      deptId,
     });
@@ -179,6 +193,7 @@ cron.schedule('*/15 * * * *', async () => {
       broadcast({
         type:    'sla.escalation',
         task_id: task.id,
+        complaint_id: task.complaint_id,
         dept_id: task.dept_id,
       });
 
@@ -197,6 +212,11 @@ cron.schedule('*/15 * * * *', async () => {
     );
 
     await Promise.all(overdueTasks.map(async (task) => {
+      const { rows: [complaintRow] } = await pool.query(
+        'SELECT citizen_id FROM complaints WHERE id = $1',
+        [task.complaint_id]
+      );
+
       await pool.query(
         `UPDATE complaints SET status = 'escalated', updated_at = now()
          WHERE id = $1`,
@@ -215,6 +235,7 @@ cron.schedule('*/15 * * * *', async () => {
       broadcast({
         type:         'complaint.status_updated',
         complaint_id: task.complaint_id,
+        citizen_id:   complaintRow?.citizen_id,
         new_status:   'escalated',
         dept_id:      task.dept_id,
       });

@@ -63,7 +63,7 @@ export default function OfficerTasks() {
   const fetchTasks = useCallback(async () => {
     if (!token) return;
     try {
-      const res  = await fetch(`${BASE}/complaints?status=assigned,in_progress,open`, {
+      const res  = await fetch(`${BASE}/complaints?status=assigned,in_progress`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();

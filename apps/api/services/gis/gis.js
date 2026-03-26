@@ -200,7 +200,7 @@ router.get('/risk-heatmap', async (req, res) => {
 
 // ── DELETE /admin/demo/reset ──────────────────────────────────────────────────
 
-router.delete('/admin/demo/reset',
+router.delete('/demo/reset',
   requireRole('commissioner'),
   async (req, res) => {
     if (!IS_DEMO) return res.status(404).json({ error: 'Not found' });

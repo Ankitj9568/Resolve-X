@@ -91,9 +91,6 @@ router.post('/upload',
     if (!file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-    if (!complaintId) {
-      return res.status(400).json({ error: 'complaint_id is required' });
-    }
  
     // ── Step 1: Declared MIME type must be in allowlist ───────────────────
     const allowedTypes = ['image/jpeg', 'image/png', 'video/mp4'];
@@ -106,28 +103,30 @@ router.post('/upload',
       return res.status(400).json({ error: 'File content does not match declared type' });
     }
  
-    // ── Step 3: Verify complaint exists and belongs to the uploading user ─
-    // Citizens can only attach files to their own complaints.
-    // Officers can attach to any complaint in their dept.
-    const ownershipCheck = req.user.role === 'citizen'
-      ? 'SELECT id FROM complaints WHERE id = $1 AND citizen_id = $2'
-      : 'SELECT id FROM complaints WHERE id = $1';
-    const ownershipParams = req.user.role === 'citizen'
-      ? [complaintId, citizenId]
-      : [complaintId];
- 
-    const { rows: complaintRows } = await pool.query(ownershipCheck, ownershipParams);
-    if (!complaintRows.length) {
-      return res.status(404).json({ error: 'Complaint not found or access denied' });
-    }
- 
-    // ── Step 4: Check file count limit (max 3 per complaint) ─────────────
-    const { rows: [countRow] } = await pool.query(
-      'SELECT COUNT(*) AS cnt FROM complaint_media WHERE complaint_id = $1',
-      [complaintId]
-    );
-    if (parseInt(countRow.cnt) >= 3) {
-      return res.status(400).json({ error: 'Maximum 3 files per complaint' });
+    if (complaintId) {
+      // ── Step 3: Verify complaint exists and belongs to the uploading user ─
+      // Citizens can only attach files to their own complaints.
+      // Officers can attach to any complaint in their dept.
+      const ownershipCheck = req.user.role === 'citizen'
+        ? 'SELECT id FROM complaints WHERE id = $1 AND citizen_id = $2'
+        : 'SELECT id FROM complaints WHERE id = $1';
+      const ownershipParams = req.user.role === 'citizen'
+        ? [complaintId, citizenId]
+        : [complaintId];
+
+      const { rows: complaintRows } = await pool.query(ownershipCheck, ownershipParams);
+      if (!complaintRows.length) {
+        return res.status(404).json({ error: 'Complaint not found or access denied' });
+      }
+
+      // ── Step 4: Check file count limit (max 3 per complaint) ─────────────
+      const { rows: [countRow] } = await pool.query(
+        'SELECT COUNT(*) AS cnt FROM complaint_media WHERE complaint_id = $1',
+        [complaintId]
+      );
+      if (parseInt(countRow.cnt) >= 3) {
+        return res.status(400).json({ error: 'Maximum 3 files per complaint' });
+      }
     }
  
     // ── Step 5: Build a safe object name — no originalname in the path ───
@@ -136,7 +135,9 @@ router.post('/upload',
     const ext = file.mimetype === 'video/mp4' ? '.mp4'
               : file.mimetype === 'image/png'  ? '.png'
               : '.jpg';
-    const objectName = `${complaintId}/${crypto.randomUUID()}${ext}`;
+    const objectName = complaintId
+      ? `${complaintId}/${crypto.randomUUID()}${ext}`
+      : `temp/${citizenId}/${crypto.randomUUID()}${ext}`;
  
     try {
       // ── Step 6: Upload to MinIO/S3 ──────────────────────────────────────
@@ -151,10 +152,15 @@ router.post('/upload',
       // ── Step 7: Build public URL from env var, not hardcoded host ───────
       const fileUrl = `${S3_PUBLIC_URL}/${BUCKET}/${objectName}`;
  
+      if (!complaintId) {
+        // Pre-complaint upload flow: return URL, persist later during complaint creation.
+        return res.json({ file_url: fileUrl, temporary: true });
+      }
+
       // ── Step 8: Persist to DB ────────────────────────────────────────────
       // media_type column is 'image' | 'video' — not the full MIME string
       const mediaType = MIME_TO_MEDIA_TYPE[file.mimetype];
- 
+
       const { rows: [media] } = await pool.query(
         `INSERT INTO complaint_media
            (id, complaint_id, file_url, media_type, created_at)
@@ -163,8 +169,8 @@ router.post('/upload',
          RETURNING file_url`,
         [complaintId, fileUrl, mediaType]
       );
- 
-      return res.json({ file_url: media.file_url });
+
+      return res.json({ file_url: media.file_url, temporary: false });
  
     } catch (err) {
       console.error('Media upload error', err);

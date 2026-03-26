@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 DUPLICATE_CHECK_SQL = """
 SELECT id
 FROM complaints
-WHERE status = 'open'
-  AND user_selected_category = $1
+WHERE status != 'closed'
+    AND category = $1
   AND created_at >= (NOW() - INTERVAL '48 hours')
   AND ST_DWithin(
         location::geography,
