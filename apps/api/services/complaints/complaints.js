@@ -120,9 +120,19 @@ async function createSecondaryTasks(complaintId, secondaryIssues, slaPriority) {
 // ── POST /complaints ──────────────────────────────────────────────────────────
  
 router.post('/', requireRole('citizen'), async (req, res) => {
-  const { category, subcategory, description, longitude, latitude } = req.body;
+  const {
+    category,
+    subcategory,
+    description,
+    longitude,
+    latitude,
+    file_urls: fileUrlsRaw,
+  } = req.body;
   const citizenId = req.user.sub;
   const source    = req.user.source || 'production';
+  const fileUrls  = Array.isArray(fileUrlsRaw)
+    ? fileUrlsRaw.filter((url) => typeof url === 'string' && url.trim() !== '').slice(0, 3)
+    : [];
  
   if (!category || longitude == null || latitude == null) {
     return res.status(400).json({ error: 'category, longitude and latitude are required' });
@@ -227,6 +237,8 @@ router.post('/', requireRole('citizen'), async (req, res) => {
       category,
       subcategory,
       description,
+      file_urls: fileUrls,
+      image_url: fileUrls[0] || null,
       location:    { longitude, latitude },
       ward_id:     wardId,
       source,
