@@ -7,29 +7,28 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../store/auth';
+import { getComplaints, getRiskZones, getRiskAlerts } from '../../../utils/api';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner from '../../../components/SandboxBanner';
-import type { Complaint, GeoJsonFeature, RiskFeatureProperties } from '../../../utils/types';
+import type { Complaint, RiskZone, RiskAlert } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
 const BASE      = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
-const RISK_CONFIG = {
-  critical: { color: 'bg-red-100 text-red-700 border-red-200',    dot: 'bg-red-500'    },
-  high:     { color: 'bg-orange-100 text-orange-700 border-orange-200', dot: 'bg-orange-500' },
-  medium:   { color: 'bg-amber-100 text-amber-700 border-amber-200',   dot: 'bg-amber-400'  },
-  low:      { color: 'bg-green-100 text-green-700 border-green-200',   dot: 'bg-green-400'  },
+const RISK_CONFIG: Record<string, { color: string; dot: string }> = {
+  Critical: { color: 'bg-red-100 text-red-700 border-red-200',    dot: 'bg-red-500'    },
+  High:     { color: 'bg-orange-100 text-orange-700 border-orange-200', dot: 'bg-orange-500' },
+  Medium:   { color: 'bg-amber-100 text-amber-700 border-amber-200',   dot: 'bg-amber-400'  },
+  Low:      { color: 'bg-green-100 text-green-700 border-green-200',   dot: 'bg-green-400'  },
 };
-
-type RiskFeature = GeoJsonFeature<RiskFeatureProperties>;
 
 export default function CityCommand() {
   const router          = useRouter();
   const { token, role } = useAuthStore();
 
   const [complaints, setComplaints]   = useState<Complaint[]>([]);
-  const [riskData, setRiskData]       = useState<RiskFeature[]>([]);
-  const [warnings, setWarnings]       = useState<RiskFeature[]>([]);
+  const [riskZones, setRiskZones]     = useState<RiskZone[]>([]);
+  const [alerts, setAlerts]           = useState<RiskAlert[]>([]);
   const [loading, setLoading]         = useState(true);
   const [resetting, setResetting]     = useState(false);
   const [activeTab, setActiveTab]     = useState<'feed'|'risk'|'dept'>('feed');
@@ -42,20 +41,22 @@ export default function CityCommand() {
   const fetchAll = useCallback(async () => {
     if (!token) return;
     try {
-      const [compRes, riskRes] = await Promise.all([
-        fetch(`${BASE}/complaints`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${BASE}/gis/risk-heatmap`, { headers: { Authorization: `Bearer ${token}` } }),
+      // Fetch complaints from main API + risk data from risk service in parallel
+      const [compRes, zonesRes, alertsRes] = await Promise.allSettled([
+        fetch(`${BASE}/complaints`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+        getRiskZones(),
+        getRiskAlerts(),
       ]);
-      const compData = await compRes.json();
-      const riskJson = await riskRes.json();
-      setComplaints(compData.complaints ?? []);
 
-      const features: RiskFeature[] = riskJson.features ?? [];
-      setRiskData(features);
-      setWarnings(features.filter((f) => {
-        const tier = f.properties?.risk_tier;
-        return tier === 'high' || tier === 'critical';
-      }));
+      if (compRes.status === 'fulfilled') {
+        setComplaints(compRes.value.complaints ?? []);
+      }
+      if (zonesRes.status === 'fulfilled') {
+        setRiskZones(zonesRes.value.zones ?? []);
+      }
+      if (alertsRes.status === 'fulfilled') {
+        setAlerts(alertsRes.value.alerts ?? []);
+      }
     } catch { /* non-fatal */ } finally { setLoading(false); }
   }, [token]);
 
@@ -148,23 +149,24 @@ export default function CityCommand() {
 
       <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
 
-        {/* Early warnings */}
-        {warnings.length > 0 && (
+        {/* Early warnings from risk service */}
+        {alerts.filter(a => a.risk_level === 'High' || a.risk_level === 'Critical').length > 0 && (
           <div className="space-y-2">
-            {warnings.map((w, i: number) => {
-              const tier = w.properties?.risk_tier ?? 'high';
-              const cfg  = RISK_CONFIG[tier as keyof typeof RISK_CONFIG] ?? RISK_CONFIG.high;
-              return (
-                <div key={i} className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${cfg.color}`}>
-                  <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${cfg.dot}`} />
-                  <div>
-                    <p className="text-sm font-semibold">{w.properties?.name ?? 'Ward'}</p>
-                    <p className="text-xs opacity-80">{w.properties?.risk_label ?? `${tier} risk`}</p>
+            {alerts
+              .filter(a => a.risk_level === 'High' || a.risk_level === 'Critical')
+              .map((alert, i: number) => {
+                const cfg = RISK_CONFIG[alert.risk_level] ?? RISK_CONFIG.Medium;
+                return (
+                  <div key={i} className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${cfg.color}`}>
+                    <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${cfg.dot}`} />
+                    <div>
+                      <p className="text-sm font-semibold">{alert.ward_id}</p>
+                      <p className="text-xs opacity-80">{alert.alert_text}</p>
+                    </div>
+                    <span className="ml-auto text-xs font-semibold uppercase opacity-70">{alert.risk_level}</span>
                   </div>
-                  <span className="ml-auto text-xs font-semibold uppercase opacity-70">{tier}</span>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         )}
 
@@ -222,24 +224,22 @@ export default function CityCommand() {
 
         {activeTab === 'risk' && (
           <div className="space-y-2">
-            {riskData.length === 0 ? (
+            {riskZones.length === 0 ? (
               <p className="text-sm text-[var(--grey-text-dark)] text-center py-8">No risk data available</p>
-            ) : riskData.map((f, i: number) => {
-              const tier  = f.properties?.risk_tier ?? 'low';
-              const score = f.properties?.risk_score ?? 0;
-              const cfg   = RISK_CONFIG[tier as keyof typeof RISK_CONFIG] ?? RISK_CONFIG.low;
+            ) : riskZones.map((zone, i: number) => {
+              const cfg = RISK_CONFIG[zone.risk_level] ?? RISK_CONFIG.Low;
               return (
                 <div key={i} className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${cfg.color}`}>
                   <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
                   <div className="flex-1">
-                    <p className="text-sm font-medium">{f.properties?.name ?? `Zone ${i + 1}`}</p>
-                    {f.properties?.risk_label && (
-                      <p className="text-xs opacity-70">{f.properties.risk_label}</p>
-                    )}
+                    <p className="text-sm font-medium">{zone.ward_id}</p>
+                    <p className="text-xs opacity-70">
+                      Radius: {Math.round(zone.radius_m)}m · Risk score: {zone.risk_score}
+                    </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold">{Math.round(score * 100)}%</p>
-                    <p className="text-xs opacity-60 uppercase">{tier}</p>
+                    <p className="text-sm font-bold">{zone.risk_score}%</p>
+                    <p className="text-xs opacity-60 uppercase">{zone.risk_level}</p>
                   </div>
                 </div>
               );

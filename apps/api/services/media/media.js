@@ -78,6 +78,38 @@ const upload = multer({
   },
 });
  
+// ── MinIO Bucket Initialization ───────────────────────────────────────────────
+// Ensures the bucket exists and is publicly readable (for CDN URLs).
+let bucketInitialized = false;
+
+async function ensureBucket() {
+  if (bucketInitialized) return;
+  try {
+    const exists = await minioClient.bucketExists(BUCKET);
+    if (!exists) {
+      await minioClient.makeBucket(BUCKET);
+      console.log(`[MinIO] Created missing bucket: ${BUCKET}`);
+
+      const policy = {
+        Version: '2012-10-17',
+        Statement: [
+          {
+            Action: ['s3:GetObject'],
+            Effect: 'Allow',
+            Principal: '*',
+            Resource: [`arn:aws:s3:::${BUCKET}/*`]
+          }
+        ]
+      };
+      await minioClient.setBucketPolicy(BUCKET, JSON.stringify(policy));
+      console.log(`[MinIO] Set public read policy for: ${BUCKET}`);
+    }
+    bucketInitialized = true;
+  } catch (err) {
+    console.error(`[MinIO] Bucket setup error:`, err);
+  }
+}
+
 // ── POST /media/upload ────────────────────────────────────────────────────────
  
 router.post('/upload',
@@ -141,6 +173,8 @@ router.post('/upload',
  
     try {
       // ── Step 6: Upload to MinIO/S3 ──────────────────────────────────────
+      await ensureBucket();
+
       await minioClient.putObject(
         BUCKET,
         objectName,

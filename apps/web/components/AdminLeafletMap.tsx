@@ -6,6 +6,8 @@ import { MapContainer, TileLayer, CircleMarker, Polygon, Popup, useMap } from 'r
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type {
+  ClusterFeatureCollection,
+  ClusterProperties,
   GeoJsonFeature,
   GeoJsonFeatureCollection,
   MapMarker,
@@ -17,11 +19,6 @@ interface WardFeatureProperties {
   name?: string;
 }
 
-interface ClusterProperties {
-  cluster_id:       number;
-  complaint_count:  number;
-  primary_category: string;
-}
 
 const CATEGORY_COLORS: Record<string, string> = {
   'CAT-01': '#6366f1',
@@ -96,7 +93,7 @@ interface Props {
   markers:  MapMarker[];
   wards:    GeoJsonFeatureCollection<WardFeatureProperties> | null;
   riskData: GeoJsonFeatureCollection<RiskFeatureProperties> | null;
-  clusters: GeoJsonFeatureCollection<ClusterProperties> | null;
+  clusters: ClusterFeatureCollection | null;
 }
 
 export default function AdminLeafletMap({ markers, wards, riskData, clusters }: Props) {

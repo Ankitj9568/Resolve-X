@@ -4,14 +4,12 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../store/auth';
-import { getComplaints, updateStatus } from '../../../utils/api';
+import { getComplaints, updateStatus, getRiskAlerts } from '../../../utils/api';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner from '../../../components/SandboxBanner';
-import type { Complaint } from '../../../utils/types';
+import type { Complaint, RiskAlert } from '../../../utils/types';
 
 const DEMO_MODE = process.env.NEXT_PUBLIC_MODE === 'demo';
-const runtimeHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const RISK_URL  = process.env.NEXT_PUBLIC_RISK_URL || `http://${runtimeHost}:8020`;
 
 const STATUS_COLORS: Record<string, string> = {
   pending:     'bg-slate-800 text-[var(--grey-text-light)] border border-slate-700',
@@ -29,14 +27,6 @@ const RISK_LEVEL_STYLES: Record<string, { bar: string; badge: string; icon: stri
   Low:      { bar: 'bg-green-400',  badge: 'bg-green-500/10 text-green-400 border border-green-500/20',   icon: '🟢' },
 };
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface RiskAlert {
-  ward_id:         string;
-  alert_text:      string;
-  risk_level:      string;
-  complaint_count: number;
-}
 
 function SLABar({ slaDeadline, createdAt, now }: { slaDeadline: string; createdAt: string; now: number }) {
   const total   = new Date(slaDeadline).getTime() - new Date(createdAt).getTime();
@@ -71,8 +61,7 @@ function IntelligenceFeed() {
   const fetchAlerts = useCallback(async () => {
     try {
       setError(false);
-      const res  = await fetch(`${RISK_URL}/risk/alerts`);
-      const data = await res.json();
+      const data = await getRiskAlerts();
       setAlerts(data?.alerts ?? []);
     } catch {
       setError(true);

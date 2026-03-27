@@ -3,11 +3,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuthStore }         from '../../../store/auth';
-import { getMapMarkers, getWards, triggerDemoReset } from '../../../utils/api';
+import { getMapMarkers, getWards, getClusters, triggerDemoReset } from '../../../utils/api';
 import { addWebSocketListener } from '../../../utils/ws';
 import SandboxBanner            from '../../../components/SandboxBanner';
 import type {
   ApiErrorLike,
+  ClusterFeatureCollection,
   GeoJsonFeatureCollection,
   MapMarker,
   RiskFeatureProperties,
@@ -24,22 +25,14 @@ const LeafletMap = dynamic(() => import('../../../components/AdminLeafletMap'), 
 
 const DEMO_MODE    = process.env.NEXT_PUBLIC_MODE === 'demo';
 const runtimeHost  = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-const DBSCAN_URL   = process.env.NEXT_PUBLIC_DBSCAN_URL || `http://${runtimeHost}:8010`;
 const API_URL      = process.env.NEXT_PUBLIC_API_URL || `http://${runtimeHost}:4000/api/v1`;
-
-// GeoJSON type for DBSCAN cluster features
-interface ClusterProperties {
-  cluster_id:       number;
-  complaint_count:  number;
-  primary_category: string;
-}
 
 export default function AdminMapPage() {
   const { token, role } = useAuthStore();
   const [markers, setMarkers]     = useState<MapMarker[]>([]);
   const [wards, setWards]         = useState<GeoJsonFeatureCollection | null>(null);
   const [riskData, setRiskData]   = useState<GeoJsonFeatureCollection<RiskFeatureProperties> | null>(null);
-  const [clusters, setClusters]   = useState<GeoJsonFeatureCollection<ClusterProperties> | null>(null);
+  const [clusters, setClusters]   = useState<ClusterFeatureCollection | null>(null);
   const [resetting, setResetting] = useState(false);
 
   const fetchMarkers = useCallback(async () => {
@@ -67,15 +60,11 @@ export default function AdminMapPage() {
     } catch { /* non-fatal */ }
   }, [token]);
 
-  // ── Integration 4: Fetch DBSCAN clusters from port 8010 ──────────────────
+  // ── Fetch DBSCAN clusters via centralized API ─────────────────────────────
   const fetchClusters = useCallback(async () => {
     try {
-      const res  = await fetch(`${DBSCAN_URL}/api/v1/analytics/clusters`);
-      const data = await res.json();
-      // data is a GeoJSON FeatureCollection with Polygon/MultiPoint geometries
-      if (data?.type === 'FeatureCollection') {
-        setClusters(data);
-      }
+      const data = await getClusters();
+      setClusters(data);
     } catch (err) {
       // Non-fatal — clusters are a nice-to-have overlay
       console.warn('DBSCAN clusters unavailable:', err);
