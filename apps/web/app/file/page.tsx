@@ -165,7 +165,7 @@ export default function ComplaintFilingWizard() {
 
     return (
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-white">Add photo evidence</h2>
+        <h2 className="text-xl font-semibold text-white">Add details & evidence</h2>
         <p className="text-sm text-[var(--grey-text-dark)]">Optional · Max 3 files · 10MB each</p>
 
         {/* Upload area */}
@@ -207,15 +207,24 @@ export default function ComplaintFilingWizard() {
           </div>
         )}
 
-        {/* Multi-issue detection card — calls live classifier */}
-        {category && latitude && longitude && (
-          <IssueAnalysisCard
-            category={category as string}
-            latitude={latitude}
-            longitude={longitude}
-            imageUrl={fileUrls[0] ?? null}
+        {/* Description */}
+        <div className="pt-2">
+          <label className="block text-sm font-medium text-[var(--grey-text-light)] mb-1">
+            Description <span className="text-[var(--grey-text-dark)] font-normal">(optional)</span>
+          </label>
+          <textarea
+            className="w-full border border-slate-300 rounded-xl p-3 text-sm resize-none
+                       focus:outline-none focus:ring-2 focus:ring-emerald-400/50 focus:border-emerald-400"
+            rows={3}
+            placeholder="Any additional details about the issue…"
+            value={description}
+            maxLength={500}
+            onChange={e => setField('description', e.target.value)}
           />
-        )}
+          <p className="text-xs text-[var(--grey-text-dark)] text-right mt-1">
+            {description.length}/500
+          </p>
+        </div>
 
         <WizardNav
           onBack={() => setStep(2)}
@@ -238,7 +247,7 @@ export default function ComplaintFilingWizard() {
 
     return (
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-white">Review & describe</h2>
+        <h2 className="text-xl font-semibold text-white">Review & AI Analysis</h2>
 
         {/* Summary card */}
         <div className="bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
@@ -264,24 +273,18 @@ export default function ComplaintFilingWizard() {
           )}
         </div>
 
-        {/* Optional description — not mandatory per spec */}
-        <div>
-          <label className="block text-sm font-medium text-[var(--grey-text-light)] mb-1">
-            Additional details <span className="text-[var(--grey-text-dark)] font-normal">(optional)</span>
-          </label>
-          <textarea
-            className="w-full border border-slate-300 rounded-xl p-3 text-sm resize-none
-                       focus:outline-none focus:ring-2 focus:ring-emerald-400/50 focus:border-emerald-400"
-            rows={3}
-            placeholder="Any additional details about the issue…"
-            value={description}
-            maxLength={500}
-            onChange={e => setField('description', e.target.value)}
-          />
-          <p className="text-xs text-[var(--grey-text-dark)] text-right mt-1">
-            {description.length}/500
-          </p>
-        </div>
+        {/* Multi-issue detection card — calls live classifier */}
+        {category && latitude && longitude && (
+          <div className="mt-4">
+            <IssueAnalysisCard
+              category={category as string}
+              latitude={latitude}
+              longitude={longitude}
+              description={description}
+              imageUrl={fileUrls[0] ?? null}
+            />
+          </div>
+        )}
 
         {error && <ErrorBanner message={error} />}
 
@@ -389,7 +392,7 @@ export default function ComplaintFilingWizard() {
 
   // ── Progress bar ─────────────────────────────────────────────────────────
 
-  const stepLabels = ['Category', 'Location', 'Evidence', 'Review', 'Done'];
+  const stepLabels = ['Category', 'Location', 'Details', 'Review', 'Done'];
 
   // ── Render ────────────────────────────────────────────────────────────────
 

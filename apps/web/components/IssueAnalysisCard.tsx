@@ -54,11 +54,12 @@ interface Props {
   latitude: number | null;
   longitude: number | null;
   imageUrl?: string | null;   // first uploaded file URL, if any
+  description?: string;       // explicit user description
 }
 
 type Status = 'loading' | 'live' | 'fallback' | 'duplicate';
 
-export default function IssueAnalysisCard({ category, latitude, longitude, imageUrl }: Props) {
+export default function IssueAnalysisCard({ category, latitude, longitude, imageUrl, description }: Props) {
   const [status, setStatus]     = useState<Status>('loading');
   const [analysis, setAnalysis] = useState<ClassifierAnalysis | null>(null);
   const [parentId, setParentId] = useState<string | null>(null);
@@ -79,7 +80,7 @@ export default function IssueAnalysisCard({ category, latitude, longitude, image
     const controller = new AbortController();
 
     analyzeComplaint({
-      text_description:       CATEGORY_DESCRIPTION[category] ?? 'Public complaint requiring attention',
+      text_description:       (description && description.trim().length > 0) ? description : (CATEGORY_DESCRIPTION[category] ?? 'Public complaint requiring attention'),
       latitude,
       longitude,
       user_selected_category: CATEGORY_TO_CLASSIFIER[category] ?? category,
@@ -103,7 +104,7 @@ export default function IssueAnalysisCard({ category, latitude, longitude, image
       });
 
     return () => controller.abort();
-  }, [category, latitude, longitude, imageUrl]);
+  }, [category, latitude, longitude, imageUrl, description]);
 
   if (!category) return null;
 
