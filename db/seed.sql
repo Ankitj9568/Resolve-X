@@ -36,7 +36,11 @@ INSERT INTO departments (id, name, code, city_id) VALUES
   ('a0000000-0000-0000-0000-000000000003', 'Electrical Department',  'ELECTRICAL', 'DELHI'),
   ('a0000000-0000-0000-0000-000000000004', 'Water Department',       'WATER',      'DELHI'),
   ('a0000000-0000-0000-0000-000000000005', 'Sanitation Department',  'SANITATION', 'DELHI'),
-  ('a0000000-0000-0000-0000-000000000006', 'General Department',     'GENERAL',    'DELHI');
+  ('a0000000-0000-0000-0000-000000000006', 'General Department',     'GENERAL',    'DELHI')
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  code = EXCLUDED.code,
+  city_id = EXCLUDED.city_id;
 
 -- ── Wards (real Delhi approximate boundaries) ─────────────────────────────────
 -- Ward boundaries are approximate rectangles in Delhi.
@@ -53,12 +57,16 @@ INSERT INTO wards (id, name, city_id, boundary, risk_score, risk_label) VALUES
 
   ('DEMO_WARD', 'Demo Ward — Bharat Mandapam', 'DELHI',
    ST_GeomFromText('POLYGON((77.195 28.595, 77.225 28.595, 77.225 28.625, 77.195 28.625, 77.195 28.595))', 4326),
-   0.76, '76% flood risk before monsoon season');
+   0.76, '76% flood risk before monsoon season')
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name, city_id = EXCLUDED.city_id, boundary = EXCLUDED.boundary, risk_score = EXCLUDED.risk_score, risk_label = EXCLUDED.risk_label;
 
 -- City boundary polygon for geo-validation (covers all three wards + buffer)
 INSERT INTO wards (id, name, city_id, boundary) VALUES
   ('CITY_BOUNDARY', 'Delhi Service Area', 'DELHI',
-   ST_GeomFromText('POLYGON((77.10 28.40, 77.50 28.40, 77.50 28.90, 77.10 28.90, 77.10 28.40))', 4326));
+   ST_GeomFromText('POLYGON((77.10 28.40, 77.50 28.40, 77.50 28.90, 77.10 28.90, 77.10 28.40))', 4326))
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name, city_id = EXCLUDED.city_id, boundary = EXCLUDED.boundary;
 
 -- ── Demo citizen account ──────────────────────────────────────────────────────
 
