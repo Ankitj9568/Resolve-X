@@ -10,6 +10,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d   # runs 001–010 on first start
+      - .db:/db
     environment:
       POSTGRES_USER:     resolvex
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

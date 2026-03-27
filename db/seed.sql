@@ -91,19 +91,19 @@ ON CONFLICT (email) DO UPDATE SET
 
 -- ── Officers (2 per department, assigned real dept_ids) ───────────────────────
 
-INSERT INTO users (id, name, role, dept_id, ward_id, city_id, email, employee_id, is_active) VALUES
-  (gen_random_uuid(),'Officer Roads 1',      'officer','a0000000-0000-0000-0000-000000000001','W14',      'DELHI','officer.roads1@resolvex.in',     'DELHI-W14-ROADS-001',true),
-  (gen_random_uuid(),'Officer Roads 2',      'officer','a0000000-0000-0000-0000-000000000001','W22',      'DELHI','officer.roads2@resolvex.in',     'DELHI-W22-ROADS-002',true),
-  (gen_random_uuid(),'Officer Drainage 1',   'officer','a0000000-0000-0000-0000-000000000002','W14',      'DELHI','officer.drainage1@resolvex.in',  'DELHI-W14-DRN-001',  true),
-  (gen_random_uuid(),'Officer Drainage 2',   'officer','a0000000-0000-0000-0000-000000000002','DEMO_WARD','DELHI','officer.drainage2@resolvex.in',  'DELHI-DW-DRN-002',   true),
-  (gen_random_uuid(),'Officer Electrical 1', 'officer','a0000000-0000-0000-0000-000000000003','W22',      'DELHI','officer.electrical1@resolvex.in','DELHI-W22-ELEC-001',  true),
-  (gen_random_uuid(),'Officer Electrical 2', 'officer','a0000000-0000-0000-0000-000000000003','W14',      'DELHI','officer.electrical2@resolvex.in','DELHI-W14-ELEC-002',  true),
-  (gen_random_uuid(),'Officer Water 1',      'officer','a0000000-0000-0000-0000-000000000004','W14',      'DELHI','officer.water1@resolvex.in',     'DELHI-W14-WATER-001', true),
-  (gen_random_uuid(),'Officer Water 2',      'officer','a0000000-0000-0000-0000-000000000004','W22',      'DELHI','officer.water2@resolvex.in',     'DELHI-W22-WATER-002', true),
-  (gen_random_uuid(),'Officer Sanitation 1', 'officer','a0000000-0000-0000-0000-000000000005','DEMO_WARD','DELHI','officer.sanitation1@resolvex.in','DELHI-DW-SAN-001',    true),
-  (gen_random_uuid(),'Officer Sanitation 2', 'officer','a0000000-0000-0000-0000-000000000005','W22',      'DELHI','officer.sanitation2@resolvex.in','DELHI-W22-SAN-002',   true),
-  (gen_random_uuid(),'Officer General 1',    'officer','a0000000-0000-0000-0000-000000000006','W14',      'DELHI','officer.general1@resolvex.in',   'DELHI-W14-GEN-001',   true),
-  (gen_random_uuid(),'Officer General 2',    'officer','a0000000-0000-0000-0000-000000000006','DEMO_WARD','DELHI','officer.general2@resolvex.in',   'DELHI-DW-GEN-002',    true);
+INSERT INTO users (id, name, role, dept_id, ward_id, city_id, email, employee_id, is_active, password_hash) VALUES
+  (gen_random_uuid(),'Officer Roads 1',      'officer','a0000000-0000-0000-0000-000000000001','W14',      'DELHI','officer.roads1@resolvex.in',     'DELHI-W14-ROADS-001',true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Roads 2',      'officer','a0000000-0000-0000-0000-000000000001','W22',      'DELHI','officer.roads2@resolvex.in',     'DELHI-W22-ROADS-002',true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Drainage 1',   'officer','a0000000-0000-0000-0000-000000000002','W14',      'DELHI','officer.drainage1@resolvex.in',  'DELHI-W14-DRN-001',  true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Drainage 2',   'officer','a0000000-0000-0000-0000-000000000002','DEMO_WARD','DELHI','officer.drainage2@resolvex.in',  'DELHI-DW-DRN-002',   true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Electrical 1', 'officer','a0000000-0000-0000-0000-000000000003','W22',      'DELHI','officer.electrical1@resolvex.in','DELHI-W22-ELEC-001',  true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Electrical 2', 'officer','a0000000-0000-0000-0000-000000000003','W14',      'DELHI','officer.electrical2@resolvex.in','DELHI-W14-ELEC-002',  true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Water 1',      'officer','a0000000-0000-0000-0000-000000000004','W14',      'DELHI','officer.water1@resolvex.in',     'DELHI-W14-WATER-001', true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Water 2',      'officer','a0000000-0000-0000-0000-000000000004','W22',      'DELHI','officer.water2@resolvex.in',     'DELHI-W22-WATER-002', true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Sanitation 1', 'officer','a0000000-0000-0000-0000-000000000005','DEMO_WARD','DELHI','officer.sanitation1@resolvex.in','DELHI-DW-SAN-001',    true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer Sanitation 2', 'officer','a0000000-0000-0000-0000-000000000005','W22',      'DELHI','officer.sanitation2@resolvex.in','DELHI-W22-SAN-002',   true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer General 1',    'officer','a0000000-0000-0000-0000-000000000006','W14',      'DELHI','officer.general1@resolvex.in',   'DELHI-W14-GEN-001',   true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu'),
+  (gen_random_uuid(),'Officer General 2',    'officer','a0000000-0000-0000-0000-000000000006','DEMO_WARD','DELHI','officer.general2@resolvex.in',   'DELHI-DW-GEN-002',    true,'$2b$10$jMf/4lzgKTr35KkjQ8jOVO03S.g8cjYIDb4pqdlyO4DW.dzHuDKyu');
 
 -- ── 60 Seed Complaints with real GPS coordinates ──────────────────────────────
 -- All: source='production', officer_verified=true → solid markers on map
