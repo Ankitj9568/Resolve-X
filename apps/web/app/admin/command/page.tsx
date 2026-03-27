@@ -41,14 +41,25 @@ export default function CityCommand() {
   const fetchAll = useCallback(async () => {
     if (!token) return;
     try {
-      // Fetch complaints from main API + risk data from risk service in parallel
+      // Commissioner sees all complaints city-wide — use higher limit
       const [compRes, zonesRes] = await Promise.allSettled([
-        getComplaints(token),
+        getComplaints(token, '?limit=500'),
         getRiskZones(),
       ]);
 
       if (compRes.status === 'fulfilled') {
-        setComplaints(compRes.value.complaints ?? []);
+        const raw = compRes.value.complaints ?? [];
+        // Sort: active complaints first (pending/assigned/in_progress/escalated),
+        // then by most recently created
+        const resolved = new Set(['resolved', 'closed']);
+        raw.sort((a, b) => {
+          const aResolved = resolved.has(a.status) ? 1 : 0;
+          const bResolved = resolved.has(b.status) ? 1 : 0;
+          if (aResolved !== bResolved) return aResolved - bResolved;
+          // Within the same group, newest first
+          return new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
+        });
+        setComplaints(raw);
       }
       if (zonesRes.status === 'fulfilled') {
         setRiskZones(zonesRes.value.zones ?? []);
@@ -79,6 +90,7 @@ export default function CityCommand() {
           c.id === event.complaint_id ? { ...c, status: newStatus } : c
         ));
       }
+      if (event.type === 'complaint.submitted') fetchAll();
       if (event.type === 'sla.escalation') fetchAll();
       if (event.type === 'demo.reset') fetchAll();
     });
@@ -179,7 +191,7 @@ export default function CityCommand() {
           <div className="space-y-2">
             {loading ? (
               [1,2,3].map(i => <div key={i} className="h-16 rounded-xl border-white/5 bg-[var(--secondary-dark)] animate-pulse" />)
-            ) : complaints.slice(0, 30).map(c => (
+            ) : complaints.map(c => (
               <div key={c.id}
                 onClick={() => router.push(`/track/${c.id}`)}
                 className="rounded-2xl border border-white/5 bg-[var(--secondary-dark)] shadow-[0_8px_32px_rgba(0,0,0,0.5)]  px-4 py-3 border border-white/[0.06]

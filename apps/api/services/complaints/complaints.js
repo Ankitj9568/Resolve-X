@@ -265,6 +265,15 @@ router.post('/', requireRole('citizen'), async (req, res) => {
       source,
     });
 
+    // ── Step 9b: Broadcast to WebSocket listeners ─────────────────────────
+    broadcast({
+      type:         'complaint.submitted',
+      complaint_id: complaint.id,
+      citizen_id:   citizenId,
+      category,
+      ward_id:      wardId,
+    });
+
     // ── Step 10: Respond ──────────────────────────────────────────────────
     return res.status(201).json({
       complaint_id:     complaint.id,
